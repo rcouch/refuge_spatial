@@ -17,6 +17,16 @@
 % those functions.
 
 -include_lib("couch/include/couch_db.hrl").
+
+% Needed for get_os_process/1
+-record(proc, {
+        pid,
+        lang,
+        ddoc_keys = [],
+        prompt_fun,
+        set_timeout_fun,
+        stop_fun}).
+
 -export([start_doc_map/3, start_list_resp/6, send_non_empty_chunk/2,
     sort_lib/1, list_index_files/1, make_arity_3_fun/1]).
 
