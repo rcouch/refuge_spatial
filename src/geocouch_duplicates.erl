@@ -18,14 +18,15 @@
 
 -include_lib("couch/include/couch_db.hrl").
 
-%% copy from couch_os_process
--record(os_proc,
-    {command,
-     port,
-     writer,
-     reader,
-     timeout=5000
-    }).
+%% copy from couch_query_servers
+-record(proc, {
+    pid,
+    lang,
+    ddoc_keys = [],
+    prompt_fun,
+    set_timeout_fun,
+    stop_fun
+}).
 
 -export([start_doc_map/3, start_list_resp/6, send_non_empty_chunk/2,
     sort_lib/1, list_index_files/1]).
