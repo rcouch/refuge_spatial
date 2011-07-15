@@ -18,17 +18,17 @@
 
 -include_lib("couch/include/couch_db.hrl").
 
-% Needed for get_os_process/1
--record(proc, {
-        pid,
-        lang,
-        ddoc_keys = [],
-        prompt_fun,
-        set_timeout_fun,
-        stop_fun}).
+%% copy from couch_os_process
+-record(os_proc,
+    {command,
+     port,
+     writer,
+     reader,
+     timeout=5000
+    }).
 
 -export([start_doc_map/3, start_list_resp/6, send_non_empty_chunk/2,
-    sort_lib/1, list_index_files/1, make_arity_3_fun/1]).
+    sort_lib/1, list_index_files/1]).
 
 % From couch_query_servers.erl
 start_doc_map(Lang, Functions, Lib) ->
@@ -43,39 +43,6 @@ start_doc_map(Lang, Functions, Lib) ->
             Proc, [<<"add_fun">>, FunctionSource])
     end, Functions),
     {ok, Proc}.
-% Needed for start_doc_map/3
-get_os_process(Lang) ->
-    case gen_server:call(couch_query_servers, {get_proc, Lang}) of
-    {ok, Proc, {QueryConfig}} ->
-        case (catch couch_query_servers:proc_prompt(Proc, [<<"reset">>, {QueryConfig}])) of
-        true ->
-            Timeout = case couch_util:get_value(<<"timeout">>, QueryConfig) of
-                undefined ->
-                    % This happens in CouchDB 1.0.x. Default to OS process timeout.
-                    list_to_integer(couch_config:get(
-                                    "couchdb", "os_process_timeout", "5000"));
-                FoundTimeout ->
-                    FoundTimeout
-            end,
-            proc_set_timeout(Proc, Timeout),
-            link(Proc#proc.pid),
-            gen_server:call(couch_query_servers, {unlink_proc, Proc#proc.pid}),
-            Proc;
-        _ ->
-            catch proc_stop(Proc),
-            get_os_process(Lang)
-        end;
-    Error ->
-        throw(Error)
-    end.
-% Needed for get_os_process/1
-proc_set_timeout(Proc, Timeout) ->
-    {Mod, Func} = Proc#proc.set_timeout_fun,
-    apply(Mod, Func, [Proc#proc.pid, Timeout]).
-% Needed for get_os_process/1
-proc_stop(Proc) ->
-    {Mod, Func} = Proc#proc.stop_fun,
-    apply(Mod, Func, [Proc#proc.pid]).
 
 
 % From couch_httpd_show
@@ -114,7 +81,6 @@ apply_etag({ExternalResponse}, CurrentEtag) ->
         end || Field <- ExternalResponse]}
     end.
 
-
 % From couch_httpd_show
 send_non_empty_chunk(Resp, Chunk) ->
     case Chunk of
@@ -139,11 +105,33 @@ list_index_files(Db) ->
     RootDir = couch_config:get("couchdb", "view_index_dir"),
     filelib:wildcard(RootDir ++ "/." ++ ?b2l(couch_db:name(Db)) ++ "_design"++"/*").
 
-% From couch_httpd (will be exported from 1.1.x on)
-make_arity_3_fun(SpecStr) ->
-    case couch_util:parse_term(SpecStr) of
-    {ok, {Mod, Fun, SpecArg}} ->
-	fun(Arg1, Arg2, Arg3) -> Mod:Fun(Arg1, Arg2, Arg3, SpecArg) end;
-    {ok, {Mod, Fun}} ->
-	fun(Arg1, Arg2, Arg3) -> Mod:Fun(Arg1, Arg2, Arg3) end
+
+%% --------------------------------------------
+%% functions not exported by couch_query_server
+%% --------------------------------------------
+
+get_os_process(Lang) ->
+    case gen_server:call(couch_query_servers, {get_proc, Lang}) of
+    {ok, Proc, {QueryConfig}} ->
+        case (catch couch_query_servers:proc_prompt(Proc, [<<"reset">>, {QueryConfig}])) of
+        true ->
+            proc_set_timeout(Proc, couch_util:get_value(<<"timeout">>, QueryConfig)),
+            link(Proc#proc.pid),
+            gen_server:call(couch_query_servers, {unlink_proc, Proc#proc.pid}),
+            Proc;
+        _ ->
+            catch proc_stop(Proc),
+            get_os_process(Lang)
+        end;
+    Error ->
+        throw(Error)
     end.
+
+proc_stop(Proc) ->
+    {Mod, Func} = Proc#proc.stop_fun,
+    apply(Mod, Func, [Proc#proc.pid]).
+
+proc_set_timeout(Proc, Timeout) ->
+    {Mod, Func} = Proc#proc.set_timeout_fun,
+    apply(Mod, Func, [Proc#proc.pid, Timeout]).
+
