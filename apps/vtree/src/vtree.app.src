@@ -1,0 +1,6 @@
+{application, vtree, [
+    {description, "VTree by Volker"},
+    {vsn, git},
+    {registered, []},
+    {applications, [kernel]}
+]}.

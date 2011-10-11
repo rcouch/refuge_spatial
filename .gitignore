@@ -4,3 +4,8 @@
 *.rej
 erl_crash.dump
 coverage
+*.tar.gz
+tmp
+src/geocouch/ebin
+src/vtree/ebin
+ebin

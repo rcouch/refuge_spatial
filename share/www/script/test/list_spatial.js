@@ -203,6 +203,7 @@ couchTests.list_spatial = function(debug) {
   // standard get
   xhr = CouchDB.request("GET", url_pre + "basicBasic/basicIndex" + url_bbox);
   T(xhr.status == 200, "standard get should be 200");
+  alert(xhr.responseText);
   T(/head9876543210tail/.test(xhr.responseText));
 
   // test that etags are available

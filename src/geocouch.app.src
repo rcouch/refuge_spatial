@@ -1,0 +1,6 @@
+{application, geocouch, [
+    {description, "GeoCouch by Volker"},
+    {vsn, git},
+    {registered, []},
+    {applications, [kernel]}
+]}.
