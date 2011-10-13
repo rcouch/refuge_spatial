@@ -1,3 +1,8 @@
+%%% -*- erlang -*-
+%%%
+%%% This file is part of geocouch released under the Apache license 2. 
+%%% See the NOTICE for more information.
+
 {application, vtree, [
     {description, "VTree by Volker"},
     {vsn, git},

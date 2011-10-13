@@ -1,3 +1,8 @@
+%%% -*- erlang -*-
+%%%
+%%% This file is part of geocouch released under the Apache license 2. 
+%%% See the NOTICE for more information.
+
 -module(geocouch_cleanup).
 
 -export([run/1]).

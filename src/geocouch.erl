@@ -1,3 +1,8 @@
+%%% -*- erlang -*-
+%%%
+%%% This file is part of geocouch released under the Apache license 2. 
+%%% See the NOTICE for more information.
+
 -module(geocouch).
 
 -export([spatial_query/3, spatial_query/4, spatial_query/6]).
