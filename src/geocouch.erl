@@ -65,7 +65,7 @@ compact(Db, DDoc) ->
 
 
 cleanup(Db) ->
-    geocouch_cleanum:run(Db).
+    geocouch_cleanup:run(Db).
 
 
 spatial_fold(Db, Idx, Args, Callback, Acc) ->
