@@ -18,7 +18,7 @@ run(Db) ->
 
     {ok, DesignDocs} = couch_db:get_design_docs(Db),
     SigFiles = lists:foldl(fun(DDoc, SFAcc) ->
-        InitState = geocouch_util:ddoc_to_mrst(DbName, DDoc),
+        InitState = geocouch_util:ddoc_to_gcst(DbName, DDoc),
         Sig = InitState#gcst.sig,
         IFName = geocouch_util:index_file(IdxDir, DbName, Sig),
         CFName = geocouch_util:compaction_file(IdxDir, DbName, Sig),
