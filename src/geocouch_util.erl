@@ -19,7 +19,7 @@
 -export([get_row_count/1, fold/5]).
 -export([get_req_handler/1, hexsig/1]).
 -export([from_geojson/1, to_geojson/1, make_bbox/2, make_bbox/3]).
-
+-export([ddoc_to_gcst/2]).
 
 get_indexer_pid(DbName, DDoc) when is_binary(DbName) ->
     couch_util:with_db(DbName, fun(Db) -> get_indexer_pid(Db, DDoc) end);
