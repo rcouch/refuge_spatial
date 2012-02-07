@@ -1,10 +1,10 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2. 
 %%% See the NOTICE for more information.
 
 
--module(geocouch_index).
+-module(refuge_spatial_index).
 
 -behaviour(couch_index_api).
 
@@ -13,7 +13,7 @@
 -export([start_update/3, purge/4, process_doc/3, finish_update/1, commit/1]).
 -export([compact/3, swap_compacted/2]).
 
--include_lib("geocouch/include/geocouch.hrl").
+-include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 get(Property, State) ->
     case Property of
@@ -48,7 +48,7 @@ get(Property, State) ->
             } = State,
             {ok, Size} = couch_file:bytes(Fd),
             {ok, [
-                {signature, list_to_binary(geocouch_util:hexsig(Sig))},
+                {signature, list_to_binary(refuge_spatial_util:hexsig(Sig))},
                 {language, Lang},
                 {disk_size, Size},
                 {update_seq, UpdateSeq},
@@ -59,7 +59,7 @@ get(Property, State) ->
     end.
 
 init(Db, DDoc) ->
-    geocouch_util:ddoc_to_gcst(couch_db:name(Db), DDoc).
+    refuge_spatial_util:ddoc_to_gcst(couch_db:name(Db), DDoc).
 
 open(Db, State) ->
     #gcst{
@@ -67,18 +67,18 @@ open(Db, State) ->
         sig=Sig,
         root_dir=RootDir
     } = State,
-    IndexFName = geocouch_util:index_file(RootDir, DbName, Sig),
-    case geocouch_util:open_file(IndexFName) of
+    IndexFName = refuge_spatial_util:index_file(RootDir, DbName, Sig),
+    case refuge_spatial_util:open_file(IndexFName) of
         {ok, Fd} ->
             case (catch couch_file:read_header(Fd)) of
                 {ok, {Sig, Header}} ->
                     % Matching view signatures.
-                    {ok, geocouch_util:init_state(Db, Fd, State, Header)};
+                    {ok, refuge_spatial_util:init_state(Db, Fd, State, Header)};
                 _ ->
-                    {ok, geocouch_util:reset_index(Db, Fd, State)}
+                    {ok, refuge_spatial_util:reset_index(Db, Fd, State)}
             end;
         Error ->
-            (catch geocouch_util:delete_index_file(RootDir, DbName, Sig)),
+            (catch refuge_spatial_util:delete_index_file(RootDir, DbName, Sig)),
             Error
     end.
 
@@ -88,7 +88,7 @@ close(State) ->
 
 delete(#gcst{db_name=DbName, sig=Sig, root_dir=RootDir}=State) ->
     couch_file:close(State#gcst.fd),
-    catch geocouch_util:delete_index_file(RootDir, DbName, Sig).
+    catch refuge_spatial_util:delete_index_file(RootDir, DbName, Sig).
 
 
 purge(Db, PurgeSeq, PurgedIdRevs, State) ->
@@ -96,33 +96,33 @@ purge(Db, PurgeSeq, PurgedIdRevs, State) ->
 
 
 start_update(Partial, State, NumChanges) ->
-    geocouch_updater:start_update(Partial, State, NumChanges).
+    refuge_spatial_updater:start_update(Partial, State, NumChanges).
 
 
 process_doc(Doc, Seq, State) ->
-    geocouch_updater:process_doc(Doc, Seq, State).
+    refuge_spatial_updater:process_doc(Doc, Seq, State).
 
 
 finish_update(State) ->
-    geocouch_updater:finish_update(State).
+    refuge_spatial_updater:finish_update(State).
 
 
 commit(State) ->
-    Header = {State#gcst.sig, geocouch_util:make_header(State)},
+    Header = {State#gcst.sig, refuge_spatial_util:make_header(State)},
     couch_file:write_header(State#gcst.fd, Header),
     couch_file:sync(State#gcst.fd).
 
 
 compact(Db, State, Opts) ->
-    geocouch_compactor:compact(Db, State, Opts).
+    refuge_spatial_compactor:compact(Db, State, Opts).
 
 
 swap_compacted(OldState, NewState) ->
-    geocouch_compactor:swap_compacted(OldState, NewState).
+    refuge_spatial_compactor:swap_compacted(OldState, NewState).
 
 
 reset(State) ->
     couch_util:with_db(State#gcst.db_name, fun(Db) ->
-        NewState = geocouch_util:reset_index(Db, State#gcst.fd, State),
+        NewState = refuge_spatial_util:reset_index(Db, State#gcst.fd, State),
         {ok, NewState}
     end).

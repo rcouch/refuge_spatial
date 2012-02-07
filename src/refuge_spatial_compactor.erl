@@ -1,13 +1,13 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2. 
 %%% See the NOTICE for more information.
 
 
--module(geocouch_compactor).
+-module(refuge_spatial_compactor).
 
 -include_lib("couch/include/couch_db.hrl").
--include_lib("geocouch/include/geocouch.hrl").
+-include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 -export([compact/3, swap_compacted/2]).
 
@@ -30,9 +30,9 @@ compact(State) ->
     } = State,
 
     EmptyState = couch_util:with_db(DbName, fun(Db) ->
-        CompactFName = geocouch_util:compaction_file(RootDir, DbName, Sig),
-        {ok, Fd} = geocouch_util:open_file(CompactFName),
-        geocouch_util:reset_index(Db, Fd, State)
+        CompactFName = refuge_spatial_util:compaction_file(RootDir, DbName, Sig),
+        {ok, Fd} = refuge_spatial_util:open_file(CompactFName),
+        refuge_spatial_util:reset_index(Db, Fd, State)
     end),
 
     #gcst{
@@ -102,7 +102,7 @@ recompact(State) ->
     link(State#gcst.fd),
     ?LOG_INFO("Recompacting index ~s ~s at ~p", [DbName, IdxName, UpdateSeq]),
     {_Pid, Ref} = erlang:spawn_monitor(fun() ->
-        couch_index_updater:update(geocouch_index, State)
+        couch_index_updater:update(refuge_spatial_index, State)
     end),
     receive
         {'DOWN', Ref, _, _, {updated, State2}} ->
@@ -112,7 +112,7 @@ recompact(State) ->
 
 
 compact_index(Idx, #gcidx{fd=EFd}=EmptyIdx, BufferSize) ->
-    {ok, Count} = geocouch_util:get_row_count(Idx),
+    {ok, Count} = refuge_spatial_util:get_row_count(Idx),
     FoldFun = fun(Node, {Vt, Vh, Acc, AccSize, Copied}) ->
         AccSize2 = AccSize + ?term_size(Node),
         case AccSize2 >= BufferSize of
@@ -145,8 +145,8 @@ swap_compacted(OldState, NewState) ->
     unlink(OldState#gcst.fd),
     link(NewState#gcst.fd),
 
-    IndexFName = geocouch_util:index_file(RootDir, DbName, Sig),
-    CompactFName = geocouch_util:compaction_file(RootDir, DbName, Sig),
+    IndexFName = refuge_spatial_util:index_file(RootDir, DbName, Sig),
+    CompactFName = refuge_spatial_util:compaction_file(RootDir, DbName, Sig),
 
     io:format("~p~n~p~n", [IndexFName, CompactFName]),
     couch_file:close(OldState#gcst.fd),

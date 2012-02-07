@@ -1,14 +1,14 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2. 
 %%% See the NOTICE for more information.
 
--module(geocouch).
+-module(refuge_spatial).
 
 -export([spatial_query/3, spatial_query/4, spatial_query/6]).
 -export([count/4, get_info/2, compact/2, cleanup/1]).
 
--include_lib("geocouch/include/geocouch.hrl").
+-include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 
 -record(gcacc, {
@@ -35,7 +35,7 @@ spatial_query(Db, DDoc, SName, Args) ->
 spatial_query(Db, DDoc, SName, Args, Callback, Acc) when is_list(Args) ->
     spatial_query(Db, DDoc, SName, to_gcargs(Args), Callback, Acc);
 spatial_query(Db, DDoc, SName, Args0, Callback, Acc0) ->
-    {ok, Idx, Sig, Args} = geocouch_util:get_index(Db, DDoc, SName, Args0),
+    {ok, Idx, Sig, Args} = refuge_spatial_util:get_index(Db, DDoc, SName, Args0),
     {ok, Acc1} = case Args#gcargs.preflight_fun of
         PFFun when is_function(PFFun, 2) -> PFFun(Sig, Acc0);
         _ -> {ok, Acc0}
@@ -50,22 +50,22 @@ default_cb(Row, Acc) ->
 
 
 count(Db, DDoc, SName, Args0) ->
-    {ok, Idx, _, Args} = geocouch_util:get_index(Db, DDoc, SName, Args0),
-    geocouch_util:count(Idx, Args).
+    {ok, Idx, _, Args} = refuge_spatial_util:get_index(Db, DDoc, SName, Args0),
+    refuge_spatial_util:count(Idx, Args).
 
 
 get_info(Db, DDoc) ->
-    {ok, Pid} = geocouch_util:get_indexer_pid(Db, DDoc),
+    {ok, Pid} = refuge_spatial_util:get_indexer_pid(Db, DDoc),
     couch_index:get_info(Pid).
 
 
 compact(Db, DDoc) ->
-    {ok, Pid} = geocouch_util:get_indexer_pid(Db, DDoc),
+    {ok, Pid} = refuge_spatial_util:get_indexer_pid(Db, DDoc),
     couch_index:compact(Pid).
 
 
 cleanup(Db) ->
-    geocouch_cleanup:run(Db).
+    refuge_spatial_cleanup:run(Db).
 
 
 spatial_fold(Db, Idx, Args, Callback, Acc) ->
@@ -80,7 +80,7 @@ spatial_fold(Db, Idx, Args, Callback, Acc) ->
         bbox=BBox,
         bounds=Bounds
     } = Args,
-    {ok, Acc1} = geocouch_util:fold(Idx, fun spatial_fold/2, Acc0, BBox,Bounds),
+    {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0, BBox,Bounds),
     finish_fold(Acc1, Idx).
 
 
@@ -125,7 +125,7 @@ finish_fold(#gcacc{user_acc=UAcc}, _Idx) ->
 
 
 make_meta(Idx) ->
-    {ok, Total} = geocouch_util:get_row_count(Idx),
+    {ok, Total} = refuge_spatial_util:get_row_count(Idx),
     {meta, [
         {total, Total},
         {update_seq, Idx#gcidx.update_seq}

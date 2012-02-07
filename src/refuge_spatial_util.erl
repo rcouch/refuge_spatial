@@ -1,13 +1,13 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2. 
 %%% See the NOTICE for more information.
 
--module(geocouch_util).
+-module(refuge_spatial_util).
 
 
 -include_lib("couch/include/couch_db.hrl").
--include_lib("geocouch/include/geocouch.hrl").
+-include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 
 -export([get_indexer_pid/2, get_index/4]).
@@ -30,7 +30,7 @@ get_indexer_pid(Db, DDoc) when is_binary(DDoc) ->
     end;
 get_indexer_pid(Db, DDoc) ->
     InitState = ddoc_to_gcst(couch_db:name(Db), DDoc),
-    couch_index_server:get_index(geocouch_index, InitState).
+    couch_index_server:get_index(refuge_spatial_index, InitState).
 
 
 get_index(Db, DDoc, SpatialName, Args0) ->
@@ -108,7 +108,7 @@ set_index_sig(State) ->
         language=Language,
         design_opts=DesignOpts
     } = State,
-    SigInfo = {Idxs, Language, DesignOpts, sort_lib(Lib), ?GEOCOUCH_DISK_VSN},
+    SigInfo = {Idxs, Language, DesignOpts, sort_lib(Lib), ?REFUGE_SPATIAL_DISK_VSN},
     State#gcst{sig=couch_util:md5(term_to_binary(SigInfo))}.
 
 

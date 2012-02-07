@@ -1,0 +1,11 @@
+%%% -*- erlang -*-
+%%%
+%%% This file is part of refuge_spatial released under the Apache license 2. 
+%%% See the NOTICE for more information.
+
+{application, refuge_spatial, [
+    {description, "GeoCouch in Refuge"},
+    {vsn, git},
+    {registered, []},
+    {applications, [kernel]}
+]}.

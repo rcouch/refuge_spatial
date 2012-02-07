@@ -1,14 +1,14 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2. 
 %%% See the NOTICE for more information.
 
 
--module(geocouch_http).
+-module(refuge_spatial_http).
 
 
 -include_lib("couch/include/couch_db.hrl").
--include_lib("geocouch/include/geocouch.hrl").
+-include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 -export([
     handle_spatial_req/3,
@@ -43,13 +43,13 @@ handle_spatial_req(Req, Db, DDoc) ->
 handle_sub_req(Req, Db, DDoc) ->
     [_, _, _DDocId, Spatial, SpatialSub | _] = Req#httpd.path_parts,
     SubReqHandler = ?b2l(<<Spatial/binary, "/", SpatialSub/binary>>),
-    Handler = geocouch_util:get_req_handler(SubReqHandler),
+    Handler = refuge_spatial_util:get_req_handler(SubReqHandler),
     Handler(Req, Db, DDoc).
 
 
 handle_info_req(#httpd{method='GET'}=Req, Db, DDoc) ->
     [_, _, Name, _, _] = Req#httpd.path_parts,
-    {ok, Info} = geocouch:get_info(Db, DDoc),
+    {ok, Info} = refuge_spatial:get_info(Db, DDoc),
     couch_httpd:send_json(Req, 200, {[
         {name, Name},
         {spatial_index, {Info}}
@@ -61,7 +61,7 @@ handle_info_req(Req, _Db, _DDoc) ->
 handle_compact_req(#httpd{method='POST'}=Req, Db, DDoc) ->
     ok = couch_db:check_is_admin(Db),
     couch_httpd:validate_ctype(Req, "application/json"),
-    ok = geocouch:compact(Db, DDoc),
+    ok = refuge_spatial:compact(Db, DDoc),
     couch_httpd:send_json(Req, 202, {[{ok, true}]});
 handle_compact_req(Req, _Db, _DDoc) ->
     couch_httpd:send_method_not_allowed(Req, "POST").
@@ -70,7 +70,7 @@ handle_compact_req(Req, _Db, _DDoc) ->
 handle_cleanup_req(#httpd{method='POST'}=Req, Db) ->
     ok = couch_db:check_is_admin(Db),
     couch_httpd:validate_ctype(Req, "application/json"),
-    ok = geocouch:cleanup(Db),
+    ok = refuge_spatial:cleanup(Db),
     couch_httpd:send_json(Req, 202, {[{ok, true}]});
 handle_cleanup_req(Req, _Db) ->
     couch_httpd:send_method_not_allowed(Req, "POST").
@@ -89,13 +89,13 @@ design_doc_spatial(Req, Db, DDoc, SpatialName) ->
     Args = Args0#gcargs{preflight_fun=ETagFun},
     case Args#gcargs.count of
         true ->
-            Count = geocouch:count(Db, DDoc, SpatialName, Args),
+            Count = refuge_spatial:count(Db, DDoc, SpatialName, Args),
             couch_httpd:send_json(Req, {[{count, Count}]});
         false ->
             {ok, Resp} = couch_httpd:etag_maybe(Req, fun() ->
                 SAcc0 = #sacc{db=Db, req=Req},
                 CB = fun spatial_cb/2,
-                geocouch:spatial_query(Db, DDoc, SpatialName, Args, CB, SAcc0)
+                refuge_spatial:spatial_query(Db, DDoc, SpatialName, Args, CB, SAcc0)
             end),
             case is_record(Resp, sacc) of
                 true -> {ok, Resp#sacc.resp};
@@ -145,7 +145,7 @@ row_to_json(Row) ->
     Obj = {[
         {id, Id},
         {bbox, tuple_to_list(BBox)},
-        {geometry, geocouch_util:to_geojson(Geom)},
+        {geometry, refuge_spatial_util:to_geojson(Geom)},
         {value, Val}
     ]},
     ?JSON_ENCODE(Obj).

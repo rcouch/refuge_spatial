@@ -1,15 +1,15 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2. 
 %%% See the NOTICE for more information.
 
 
--module(geocouch_updater).
+-module(refuge_spatial_updater).
 
 -export([start_update/3, process_doc/3, finish_update/1, purge_index/4]).
 
 -include_lib("couch/include/couch_db.hrl").
--include_lib("geocouch/include/geocouch.hrl").
+-include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 start_update(Partial, State, NumChanges) ->
     QueueOpts = [{max_size, 100000}, {max_items, 500}],
@@ -193,7 +193,7 @@ geodoc_convert(Proc, Doc) ->
 process_js_results(Result) ->
     JsToBBox = fun([Geo, Value]) ->
         BBox = get_bbox(Geo, nil),
-        Geom = geocouch_util:from_geojson(Geo),
+        Geom = refuge_spatial_util:from_geojson(Geo),
         {list_to_tuple(BBox), {Geom, Value}}
     end,
     lists:map(JsToBBox, Result).
@@ -208,7 +208,7 @@ get_bbox({Geo}, BBox) ->
         _ ->
             Coords = couch_util:get_value(<<"coordinates">>, Geo),
             case couch_util:get_value(<<"bbox">>, Geo) of
-                undefined -> geocouch_util:make_bbox(Type, Coords);
+                undefined -> refuge_spatial_util:make_bbox(Type, Coords);
                 BBox2 -> BBox2
             end
     end.

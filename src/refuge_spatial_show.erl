@@ -1,14 +1,14 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2. 
 %%% See the NOTICE for more information.
 
--module(geocouch_show).
+-module(refuge_spatial_show).
 
 -export([handle_spatial_list_req/3]).
 
 -include_lib("couch/include/couch_db.hrl").
--include_lib("geocouch/include/geocouch.hrl").
+-include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 -record(sacc, {
     db,
@@ -36,7 +36,7 @@ handle_spatial_list_req(Req, _Db, _DDoc) ->
 
 
 handle_spatial_list(Req, Db, DDoc, LName, SDDoc, SName) ->
-    Args0 = geocouch_http:parse_qs(Req),
+    Args0 = refuge_spatial_http:parse_qs(Req),
     ETagFun = fun(BaseSig, Acc0) ->
         UserCtx = Req#httpd.user_ctx,
         Roles = UserCtx#user_ctx.roles,
@@ -52,7 +52,7 @@ handle_spatial_list(Req, Db, DDoc, LName, SDDoc, SName) ->
     couch_httpd:etag_maybe(Req, fun() ->
         couch_query_servers:with_ddoc_proc(DDoc, fun(QServer) ->
             Acc = #sacc{db=Db, req=Req, qserver=QServer, lname=LName},
-            geocouch:spatial_query(Db, SDDoc, SName, Args, fun list_cb/2, Acc)
+            refuge_spatial:spatial_query(Db, SDDoc, SName, Args, fun list_cb/2, Acc)
         end)
     end).
 
@@ -111,7 +111,7 @@ send_list_row(Row, #sacc{qserver={Proc, _}, resp=Resp}=Acc) ->
         BBox -> [{bbox, tuple_to_list(BBox)}]
     end ++ case couch_util:get_value(geometry, Row) of
         undefined -> [];
-        Geom -> [{geometry, geocouch_util:to_geojson(Geom)}]
+        Geom -> [{geometry, refuge_spatial_util:to_geojson(Geom)}]
     end ++ case couch_util:get_value(val, Row) of
         undefined -> [];
         Val -> [{value, Val}]

@@ -1,14 +1,14 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2. 
 %%% See the NOTICE for more information.
 
--module(geocouch_cleanup).
+-module(refuge_spatial_cleanup).
 
 -export([run/1]).
 
 -include_lib("couch/include/couch_db.hrl").
--include_lib("geocouch/include/geocouch.hrl").
+-include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 
 run(Db) ->
@@ -18,10 +18,10 @@ run(Db) ->
 
     {ok, DesignDocs} = couch_db:get_design_docs(Db),
     SigFiles = lists:foldl(fun(DDoc, SFAcc) ->
-        InitState = geocouch_util:ddoc_to_gcst(DbName, DDoc),
+        InitState = refuge_spatial_util:ddoc_to_gcst(DbName, DDoc),
         Sig = InitState#gcst.sig,
-        IFName = geocouch_util:index_file(IdxDir, DbName, Sig),
-        CFName = geocouch_util:compaction_file(IdxDir, DbName, Sig),
+        IFName = refuge_spatial_util:index_file(IdxDir, DbName, Sig),
+        CFName = refuge_spatial_util:compaction_file(IdxDir, DbName, Sig),
         [IFName, CFName | SFAcc]
     end, [], [DD || DD <- DesignDocs, DD#doc.deleted == false]),
 

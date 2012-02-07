@@ -10,7 +10,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--define(GEOCOUCH_DISK_VSN, 2).
+-define(REFUGE_SPATIAL_DISK_VSN, 2).
 
 
 -record(gcst, {
@@ -53,7 +53,7 @@
     purge_seq=0,
     id_btree_state=nil,
     idx_states=[],
-    disk_version = ?GEOCOUCH_DISK_VSN
+    disk_version = ?REFUGE_SPATIAL_DISK_VSN
 }).
 
 
