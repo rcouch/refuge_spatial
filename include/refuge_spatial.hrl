@@ -62,6 +62,12 @@
     stale,
     count=false,
     bounds=nil,
+    % number of nearest neighbours
+    n=nil,
+    % search point for a nearest neighbour query
+    q=nil,
+    % use spherical distances instead of cartesian
+    spherical=false,
     preflight_fun,
     extra=[]
 }).

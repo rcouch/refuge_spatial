@@ -78,7 +78,7 @@ handle_cleanup_req(Req, _Db) ->
 
 design_doc_spatial(Req, Db, DDoc, SpatialName) ->
     ?LOG_DEBUG("Spatial query (~p): ~p~n", [DDoc#doc.id, SpatialName]),
-    Args0 = parse_qs(Req),
+    Args0 = parse_spatial_params(Req),
     ETagFun = fun(Sig, Acc0) ->
         ETag = couch_httpd:make_etag(Sig),
         case couch_httpd:etag_match(Req, ETag) of
@@ -150,12 +150,44 @@ row_to_json(Row) ->
     ]},
     ?JSON_ENCODE(Obj).
 
+parse_spatial_params(Req) ->
+    QueryArgs = parse_qs(Req),
+
+    #gcargs{
+        bbox = Bbox,
+        bounds = Bounds,
+        n = N,
+        q = Q
+    } = QueryArgs,
+
+    % check if n and q are both set for knn-query
+    case ((Q /= nil) xor (N /= nil)) of
+    true ->
+        throw({query_parse_error, <<"Invalid k-nearest-neighbour-query, "
+            "parameters `n` and `q` must both be set">>});
+    _ -> ok
+    end,
+
+    case {Bbox, Bounds} of
+    % Coordinates of the bounding box are flipped and no bounds for the
+    % cartesian plane were set
+    {{West, South, East, North}, nil} when East < West; North < South ->
+        Msg = <<"Coordinates of the bounding box are flipped, but no bounds "
+                "for the cartesian plane were specified "
+                "(use the `plane_bounds` parameter)">>,
+        throw({query_parse_error, Msg});
+    _ ->
+        QueryArgs
+    end.
 
 parse_qs(Req) ->
-    lists:foldl(fun({K, V}, Acc) ->
-        parse_qs(K, V, Acc)
-    end, #gcargs{}, couch_httpd:qs(Req)).
-
+    QueryList = couch_httpd:qs(Req),
+    lists:foldl(
+        fun({K, V}, Acc) ->
+            parse_qs(K, V, Acc)
+        end,
+        #gcargs{},
+        QueryList).
 
 parse_qs(Key, Val, Args) ->
     case Key of
@@ -175,6 +207,16 @@ parse_qs(Key, Val, Args) ->
         "plane_bounds" ->
             Bounds = list_to_tuple(?JSON_DECODE("[" ++ Val ++ "]")),
             Args#gcargs{bounds=Bounds};
+        "n" ->
+            [N] = ?JSON_DECODE("[" ++ Val ++ "]"),
+            Args#gcargs{n=N};
+        "q" ->
+            Q = list_to_tuple(?JSON_DECODE("[" ++ Val ++ "]")),
+            Args#gcargs{q=Q};
+        "spherical" when Val == "true" ->
+            Args#gcargs{spherical=true};
+        "spherical" ->
+            throw({query_parse_error, <<"Invalid value for `spherical`">>});
         Key ->
             Args#gcargs{extra=[{Key, Val} | Args#gcargs.extra]}
     end.

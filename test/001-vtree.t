@@ -9,7 +9,7 @@
 main(_) ->
     code:add_pathz(filename:dirname(escript:script_name())),
     gc_test_util:init_code_path(),
-    etap:plan(137),
+    etap:plan(138),
     case (catch test()) of
         ok ->
             etap:end_tests();
@@ -20,11 +20,11 @@ main(_) ->
     ok.
 
 test() ->
-    test_within(),
     test_intersect(),
     test_disjoint(),
     test_lookup(),
     test_multilookup(),
+    test_knn(),
     test_split_bbox_if_flipped(),
     test_area(),
     test_merge_mbr(),
@@ -121,20 +121,6 @@ test_insert() ->
             "Insert a nodes into a full leaf node (root node)"),
     ok.
 
-
-test_within() ->
-    %etap:plan(4),
-    Bbox1 = {-20, -10, 30, 21},
-    Bbox2 = {-20, -10, 0, 0},
-    Mbr1_2 = {-18,-3,13,15},
-    Node1 = {{10,5,13,15}, <<"Node1">>},
-    {Node1Mbr, _} = Node1,
-    etap:is(vtree:within(Node1Mbr, Bbox1), true, "MBR is within the BBox"),
-    etap:is(vtree:within(Node1Mbr, Node1Mbr), true, "MBR is within itself"),
-    etap:is(vtree:within(Node1Mbr, Bbox2), false,
-            "MBR is not at all within BBox"),
-    etap:is(vtree:within(Mbr1_2, Bbox2), false, "MBR intersects BBox"),
-    ok.
 
 test_intersect() ->
     %etap:plan(17),
@@ -310,6 +296,70 @@ test_multilookup() ->
             "Don't find any nodes in tree (tree height=2) 2 bboxes (both "
             "outside of all nodes"),
     ok.
+
+test_knn() ->
+    %etap:plan(5),
+
+    {ok, Fd} = case couch_file:open(?FILENAME, [create, overwrite]) of
+    {ok, Fd2} ->
+        {ok, Fd2};
+    {error, Reason} ->
+        io:format("ERROR (~s): Couldn't open file (~s) for tree storage~n",
+                  [Reason, ?FILENAME])
+    end,
+    Node1 = {{1,1,2,2}, #node{type=leaf},
+        {linestring, [[1,1],[2,2]]}, <<"Node1">>},
+    Node2 = {{3,1,4,2}, #node{type=leaf},
+        {linestring, [[3,2],[4,1]]}, <<"Node2">>},
+    Node3 = {{1,4,2,5}, #node{type=leaf},
+        {linestring, [[1,5],[2,4]]}, <<"Node3">>},
+    Node4 = {{4,5,5,6}, #node{type=leaf},
+        {linestring, [[4,5],[5,6]]}, <<"Node4">>},
+    Node5 = {{6,3,7,4}, #node{type=leaf},
+        {linestring, [[6,3],[7,4]]}, <<"Node5">>},
+    Node6 = {{8.5,1,9.5,2}, #node{type=leaf},
+        {linestring, [[8.5,2],[9.5,1]]}, <<"Node6">>},
+    {Mbr1, _, Geom1, Id1} = Node1,
+    {_, _, _, Id2} = Node2,
+    {_, _, _, Id3} = Node3,
+    {_, _, _, Id4} = Node4,
+    {_, _, _, Id5} = Node5,
+    {_, _, _, Id6} = Node6,
+    Mbr1_2 = {1,1,4,2},
+    Mbr1_2_3 = {1,1,4,5},
+    Mbr1_2_3_4 = {1,1,5,6},
+    Mbr1_2_3_4_5 = {1,1,7,6},
+    Mbr1_2_3_4_5_6 = {1,1,9.5,6},
+
+    {ok, Mbr1, 0, 1} = vtree:insert(Fd, nil, Id1, Node1),
+    {ok, Mbr1_2, Pos2, 1} = vtree:insert(Fd, 0, Id2, Node2),
+    {ok, Mbr1_2_3, Pos3, 1} = vtree:insert(Fd, Pos2, Id3, Node3),
+    {ok, Mbr1_2_3_4, Pos4, 1} = vtree:insert(Fd, Pos3, Id4, Node4),
+    {ok, Mbr1_2_3_4_5, Pos5, 2} = vtree:insert(Fd, Pos4, Id5, Node5),
+    {ok, Mbr1_2_3_4_5_6, Pos6, 2} = vtree:insert(Fd, Pos5, Id6, Node6),
+
+    {ok, Result1} = gc_test_util:knn(Fd, Pos2, 1, {-45, -45}, nil, nil),
+    etap:is(Result1, [{Mbr1, Id1, Geom1, Id1}],
+            "Get single node with Id, Mbr, Geom and Value"),
+
+    {ok, Result2} = gc_test_util:knnIds(Fd, Pos6, 1000, {0, 0}, nil, nil),
+    etap:is(Result2, [Id6, Id5, Id4, Id3, Id2, Id1],
+            "Get all nodes, sorted by distance desc."),
+
+    {ok, Result3} = gc_test_util:knnIds(Fd, Pos6, 2, {2.5, 0}, nil, nil),
+    etap:is(Result3, [Id2, Id1],
+            "Get 2 nodes with same distance"),
+
+    Bounds = {0,0,10,10},
+    {ok, Result4} = gc_test_util:knnIds(Fd, Pos6, 1, {0,1}, Bounds, nil),
+    etap:is(Result4, [Id6],
+            "Bounds are used for distance calculation"),
+
+    {ok, Result5} = gc_test_util:knnIds(Fd, Pos6, 1000, {-45, -45}, nil, true),
+    etap:is(Result5, [Id4, Id5, Id6, Id3, Id2, Id1],
+            "Get all nodes, sorted by spherical distance desc."),
+    ok.
+
 
 test_split_bbox_if_flipped() ->
     %etap:plan(17),
@@ -976,3 +1026,4 @@ test_count_total() ->
 
 get_node(Fd, Pos) ->
     couch_file:pread_term(Fd, Pos).
+

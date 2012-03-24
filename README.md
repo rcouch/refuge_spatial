@@ -1,83 +1,18 @@
-Welcome to the world of GeoCouch
-================================
+Refuge Spatial
+==============
 
-GeoCouch is a spatial extension for Apache CouchDB and Couchbase.
+Refuge Spatial is a fork of GeoCouch.
+
+GeoCouch is a spatial extension for Apache CouchDB, Couchbase and Refuge.
 
 Prerequisites
 -------------
 
-A working installation of CouchDB with corresponding source
-code. GeoCouch works best with Couchbase and the latest stable releases of
-CouchDB (should be >= 1.1.0).
+A working installation of CouchDB with corresponding source code.
+At least:
 
-### Understanding the branches:
-
-This repository contains several branches, please make sure you use
-the correct one:
-
- - master: works with the CouchDB master branch from Couchbase's repo
-   (https://github.com/couchbase/couchdb)
- - couchdb1.1.x: works with Apache CouchDB 1.1.x
- - coucudb1.2.x: should work with the current Apache CouchDB trunk version,
-   but currently doesn't.
-
-Installation
-------------
-
-### Get GeoCouch:
-
-    git clone https://github.com/couchbase/geocouch.git
-    cd geocouch
-
-### Compilation
-
-Note: Always replace `<vanilla-couch>` with the path to your CouchDB
-source and `<geocouch>` with the location of the GeoCouch source.
-
-Set the `COUCH_SRC` environment to the directory that contains the
-CouchDB core source (`<vanilla-couch>/src/couchdb/`).
-
-    export COUCH_SRC=<vanilla-couch>/src/couchdb
-
-Run "make" in your <geocouch> directory
-
-    make
-
-Copy the configuration file for GeoCouch from
-`<geocouch>/etc/couchdb/local.d/` to
-`<vanilla-couch>/etc/couchdb/local.d/`
-
-    cp <geocouch>/etc/couchdb/local.d/geocouch.ini <vanilla-couch>/etc/couchdb/local.d/
-
-### Futon tests
-
-To make sure your installation is working also copy the Futon tests
-over (from `<geocouch>/share/www/script/test` to
-`<vanilla-couch>/share/www/script/test`):
-
-    cp <geocouch>/share/www/script/test/* <vanilla-couch>/share/www/script/test/
-
-Add the test to `<vanilla-couch>/share/www/script/couch_tests.js`
-
-    loadTest("spatial.js");
-    loadTest("list_spatial.js");
-    loadTest("etags_spatial.js");
-    loadTest("multiple_spatial_rows.js");
-    loadTest("spatial_compaction.js");
-    loadTest("spatial_design_docs.js");
-    loadTest("spatial_bugfixes.js");
-
-### Run CouchDB with GeoCouch
-
-The compiled beam files from GeoCouch need to be in Erlang's path,
-which can be set with the `ERL_FLAGS` environment variable:
-
-    export ERL_FLAGS="-pa <geocouch>/build"
-
-If you run a dev instance with CouchDB's `./utils/run` you can also
-define it on startup:
-
-    ERL_FLAGS="-pa <geocouch>/build" <vanilla-couch>/utils/run
+* CouchDB 1.2.x
+* Refuge 0.3
 
 
 Using GeoCouch
@@ -105,6 +40,15 @@ It should return:
     {"update_seq":3,"rows":[
     {"id":"augsburg","bbox":[10.898333,48.371667,10.898333,48.371667],"geometry":{"type":"Point","coordinates":[10.898333,48.371667]},"value":["augsburg",[10.898333,48.371667]]}
     ]}
+
+Or trigger a k-nearest-neighbour-query to request the n nearest geometries 
+relative to a given query point:
+
+    curl -X GET 'http://localhost:5984/places/_design/main/_spatial/points?n=2&q=50,10&spherical=true'
+
+If the parameter `spherical=true` is set, the [Haversine formula](http://en.wikipedia.org/wiki/Haversine_formula)
+is used to calculate spherical distances for nearest-neighbour-queries. In this case the geometries are
+expected to use the coordinate system [WGS 84](http://en.wikipedia.org/wiki/WGS_84).
 
 The Design Document Function
 ----------------------------
@@ -167,6 +111,17 @@ The bounding with the same numbers, but different order
 
     {"update_seq":6,"rows":[
     {"id":"namibia","bbox":[17.15,-22.566667,17.15,-22.566667],"geometry":{"type":"Point","coordinates":[17.15,-22.566667]},"value":["namibia",[17.15,-22.566667]]}
+    ]}
+
+The `plane_bounds` parameter is also supported for k-nearest-neighbour-queries. Note that you don't have
+to set the `plane_bounds` parameter when `spherical=true` is enabled.
+
+    curl -X GET 'http://localhost:5984/places/_design/main/_spatial/points?n=3&q=175,-25&plane_bounds=-180,-90,180,90'
+
+    {"update_seq":6,"rows":[
+    {"id":"australia","bbox":[135,-25,135,-25],"geometry":{"type":"Point","coordinates":[135,-25]},"value":"australia"},
+    {"id":"oakland","bbox":[-122.270833,37.804444,-122.270833,37.804444],"geometry":{"type":"Point","coordinates":[-122.270833,37.804444]},"value":"oakland"},
+    {"id":"brasilia","bbox":[-52.95,-10.65,-52.95,-10.65],"geometry":{"type":"Point","coordinates":[-52.95,-10.65]},"value":"brasilia"}
     ]}
 
 List function support

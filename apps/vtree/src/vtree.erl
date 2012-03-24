@@ -9,8 +9,10 @@
 -include_lib("couch/include/couch_db.hrl").
 
 -export([add_remove/5, area/1, calc_mbr/1, calc_nodes_mbr/1, count_lookup/3,
-    count_total/2, disjoint/2, foldl/4, insert/4, lookup/5, merge_mbr/2,
-    split_node/1, within/2]).
+    count_total/2, disjoint/2, foldl/4, insert/4, lookup/5, knn/7, merge_mbr/2,
+    split_node/1]).
+
+-import(geom, [within/2, distance/3, sphere_distance/2]).
 
 % TODO vmx: Function parameters order is inconsitent between insert and delete.
 
@@ -22,7 +24,8 @@
 % Nodes maximum/minimum filling grade (TODO vmx: shouldn't be hard-coded)
 % The -define(MAX_FILLED, 4) is needed when running the (Erlang based) tests.
 -ifndef(makecheck).
--define(MAX_FILLED, 40).
+-define(MAX_FILLED, 4).
+%-define(MAX_FILLED, 40).
 %-define(MIN_FILLED, 20).
 -else.
 -define(MAX_FILLED, 4).
@@ -54,7 +57,7 @@ add_remove(Fd, Pos, TargetTreeHeight, AddKeyValues, KeysToRemove) ->
         nil -> 0;
         _ -> TargetTreeHeight
     end,
-    T1 = get_timestamp(),
+    T1 = now(),
 
 %    {NewPos2, TreeHeight} = lists:foldl(fun({{Mbr, DocId}, Value}, {CurPos, _}) ->
 %        %io:format("vtree: add (~p:~p): {~p,~p}~n", [Fd, CurPos, DocId, Value]),
@@ -75,16 +78,10 @@ add_remove(Fd, Pos, TargetTreeHeight, AddKeyValues, KeysToRemove) ->
     end, [], AddKeyValues),
     {ok, NewPos2, TreeHeight} = vtree_bulk:bulk_load(
             Fd, NewPos, NewTargetTreeHeight, AddKeyValues2),
-    T2 = get_timestamp(),
-    ?LOG_DEBUG("It took: ~ps~n", [T2-T1]),
+    ?LOG_DEBUG("It took: ~ps~n", [timer:now_diff(now(), T1)/1000000]),
     ?LOG_DEBUG("Tree height: ~p~n", [TreeHeight]),
     {ok, NewPos2, TreeHeight}.
     %{ok, 0}.
-
-% Based on http://snipplr.com/view/23910/how-to-get-a-timestamp-in-milliseconds-from-erlang/ (2010-10-22)
-get_timestamp() ->
-    {Mega,Sec,Micro} = erlang:now(),
-    ((Mega*1000000+Sec)*1000000+Micro)/1000000.
 
 % Returns only the number of matching geometries
 count_lookup(Fd, Pos, Bbox) ->
@@ -147,14 +144,14 @@ lookup(Fd, Pos, Bboxes, {FoldFun, InitAcc}) ->
     {ParentMbr, ParentMeta, NodesPos} = Parent,
     case ParentMeta#node.type of
     inner ->
-        foldl_stop(fun(EntryPos, Acc) ->
-            case bboxes_not_disjoint(ParentMbr, Bboxes) of
-            true ->
-                lookup(Fd, EntryPos, Bboxes, {FoldFun, Acc});
-            false ->
-                {ok, Acc}
-            end
-        end, InitAcc, NodesPos);
+        case bboxes_not_disjoint(ParentMbr, Bboxes) of
+        true ->
+            foldl_stop(fun(EntryPos, Acc) ->
+                lookup(Fd, EntryPos, Bboxes, {FoldFun, Acc})
+            end, InitAcc, NodesPos);
+        false ->
+            {ok, InitAcc}
+        end;
     leaf ->
         case bboxes_within(ParentMbr, Bboxes) of
         % all children are within the bbox we search with
@@ -175,14 +172,93 @@ lookup(Fd, Pos, Bboxes, {FoldFun, InitAcc}) ->
         end
     end.
 
-lookup(Fd, Pos, Bbox, FoldFunAndAcc, nil) when is_list(Bbox) ->
-    lookup(Fd, Pos, Bbox, FoldFunAndAcc);
 lookup(Fd, Pos, Bbox, FoldFunAndAcc, nil) ->
     lookup(Fd, Pos, Bbox, FoldFunAndAcc);
 % Only a single bounding box. It may be split if it covers the data line
 lookup(Fd, Pos, Bbox, FoldFunAndAcc, Bounds) when not is_list(Bbox) ->
     Bboxes = split_bbox_if_flipped(Bbox, Bounds),
     lookup(Fd, Pos, Bboxes, FoldFunAndAcc).
+
+
+% k-nearest-neighbour search
+% Implements the algorithm described in "Distance Browsing in Spatial Databases" by 
+% Hjaltason and Samet (http://www.cs.umd.edu/~hjs/pubs/incnear2.pdf) (figure 4, page 10).
+% Note that this implementation only uses the MBR of the geometries to calculate the
+% distance.
+knn(_, nil, _, _, {_, InitAcc}, _, _) ->
+    % tree/file is empty
+    {ok, InitAcc};
+knn(Fd, Pos, N, QueryGeom, FoldFunAndAcc, Bounds, Spherical) ->
+    ?LOG_DEBUG("Spherical: ~p", [Spherical]),
+    {ok, Root} = couch_file:pread_term(Fd, Pos),
+    {_, Meta, _} = Root,
+
+    % add the root node to an empty priority queue
+    Nodes = pqueue2:in({Meta#node.type, Root}, 0, pqueue2:new()),
+
+    {Result, _, _} = knn2(Nodes, Fd, N, QueryGeom, Bounds, Spherical, FoldFunAndAcc, 0),
+    {ok, Result}.
+
+knn2(Nodes, Fd, N, QueryGeom, Bounds, Spherical, {FoldFun, InitAcc}, Count) ->
+    % 'main loop': take the element/node with the currently 
+    % smallest distance from the priority queue
+    case (Count >= N) or pqueue2:is_empty(Nodes) of
+    true ->
+        % we are done: either we have found N elements or we traversed the whole tree
+        {InitAcc, Count, Nodes};
+    false ->
+        {{value, Node}, RemainingNodes} = pqueue2:out(Nodes),
+        {NewAcc, NewCount, NewNodes} =
+            processNodeKnn(Node, Fd, QueryGeom, Bounds, Spherical, RemainingNodes, {FoldFun, InitAcc}, Count),
+
+        knn2(NewNodes, Fd, N, QueryGeom, Bounds, Spherical, {FoldFun, NewAcc}, NewCount)
+    end.
+
+processNodeKnn({element, Element}, _, _, _, _, Nodes, {FoldFun, Acc}, Count) ->
+    % this is the current nearest neighbour, add it to the list
+    % (now we could also check the 'real' distance for geometry types other than points)
+    {Mbr, _, {Id, {Geom, Value}}} = Element,
+    {ok, NewAcc} = FoldFun({{Mbr, Id}, {Geom, Value}}, Acc),
+
+    ?LOG_DEBUG("Adding Element: ~p - ~p", [Id, Geom]),
+
+    {NewAcc, Count + 1, Nodes};
+
+processNodeKnn({leaf, LeafNode}, _, QueryGeom, Bounds, Spherical, Nodes, {_, Acc}, Count) ->
+    {_, _, Elements} = LeafNode,
+    % add all geometries inside the leaf node to the priority queue
+    NewNodes = lists:foldl(
+        fun(Element, CurrentNodes) ->
+            {Mbr, _, _} = Element,
+            Distance = distance(QueryGeom, Mbr, Bounds, Spherical),
+            pqueue2:in({element, Element}, Distance, CurrentNodes)
+        end,
+        Nodes,
+        Elements
+    ),
+    {Acc, Count, NewNodes};
+
+processNodeKnn({inner, InnerNode}, Fd, QueryGeom, Bounds, Spherical, Nodes, {_, Acc}, Count) ->
+    {_, _, ChildrenPos} = InnerNode,
+    % add all nodes inside the inner node to the priority queue
+    NewNodes = lists:foldl(
+        fun(ChildPos, CurrentNodes) ->
+            {ok, ChildNode} = couch_file:pread_term(Fd, ChildPos),
+            {Mbr, Meta, _} = ChildNode,
+            Distance = distance(QueryGeom, Mbr, Bounds, Spherical),
+            pqueue2:in({Meta#node.type, ChildNode}, Distance, CurrentNodes)
+        end,
+        Nodes,
+        ChildrenPos
+    ),
+    {Acc, Count, NewNodes}.
+
+distance(Point, Mbr, _, Spherical) when (Spherical) ->
+    geom:sphere_distance(Point, Mbr);
+    
+distance(Point, Mbr, Bounds, _) ->
+    geom:distance(Point, Mbr, Bounds).
+
 
 % It's just like lists:foldl/3. The difference is that it can be stopped.
 % Therefore you always need to return a tuple with either "ok" or "stop"
@@ -252,13 +328,6 @@ bbox_is_flipped({_W, S, _E, N}) when N < S ->
     {flipped, y};
 bbox_is_flipped(_Bbox) ->
     not_flipped.
-
-% Tests if Inner is within Outer box
-within(Inner, Outer) ->
-    %io:format("(within) Inner, Outer: ~p, ~p~n", [Inner, Outer]),
-    {IW, IS, IE, IN} = Inner,
-    {OW, OS, OE, ON} = Outer,
-    (IW >= OW) and (IS >= OS) and (IE =< OE) and (IN =< ON).
 
 
 % Returns true if one Mbr intersects with another Mbr
@@ -735,3 +804,4 @@ pos_to_data(_Fd, [], DataList) ->
 pos_to_data(Fd, [H|T], DataList) ->
     {ok, Data} = couch_file:pread_term(Fd, H),
     pos_to_data(Fd, T, DataList ++ [Data]).
+

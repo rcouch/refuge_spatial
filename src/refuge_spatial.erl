@@ -68,6 +68,25 @@ cleanup(Db) ->
     refuge_spatial_cleanup:run(Db).
 
 
+spatial_fold(Db, Idx, Args, Callback, Acc) when
+    ((Args#gcargs.n /= nil) and
+     (Args#gcargs.q /= nil)) ->
+    Acc0 = #gcacc{
+        db=Db,
+        idx=Idx,
+        callback=Callback,
+        user_acc=Acc,
+        args=Args
+    },
+    #gcargs{
+        n=N,
+        q=QueryGeom,
+        spherical=Spherical,
+        bounds=Bounds
+    } = Args,
+    {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0, N, QueryGeom, Bounds, Spherical),
+    finish_fold(Acc1, Idx);
+
 spatial_fold(Db, Idx, Args, Callback, Acc) ->
     Acc0 = #gcacc{
         db=Db,

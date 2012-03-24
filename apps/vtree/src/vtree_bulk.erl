@@ -8,7 +8,8 @@
 -include_lib("couch/include/couch_db.hrl").
 
 -ifndef(makecheck).
--define(MAX_FILLED, 40).
+-define(MAX_FILLED, 4).
+%-define(MAX_FILLED, 40).
 -else.
 -define(MAX_FILLED, 4).
 -compile(export_all).
@@ -17,6 +18,8 @@
 -export([omt_load/2, omt_write_tree/2, bulk_load/4]).
 
 -export([log_n_ceil/2]).
+
+-import(geom, [within/2]).
 
 % XXX vmx: check if tree has correct meta information set for every node
 %    (type=inner/type=leaf)
@@ -70,8 +73,7 @@ bulk_load(Fd, _RootPos, TargetTreeHeight, Nodes) when TargetTreeHeight==0 ->
     {ok, NewPos, _} = case length(NewNodes) of
     % single node as root
     1 ->
-        Written = couch_file:append_term(Fd, hd(NewNodes)),
-        Written;
+        couch_file:append_term(Fd, hd(NewNodes));
     % multiple nodes
     _ ->
         write_parent(Fd, NewNodes)
@@ -328,7 +330,7 @@ seedtree_insert_children(#seedtree_leaf{new=Old}=Children, Node) when
 seedtree_insert_children([H|T], Node) ->
     {Mbr, Meta, Children} = H,
     {NodeMbr, _, _Data} = Node,
-    case vtree:within(NodeMbr, Mbr) of
+    case geom:within(NodeMbr, Mbr) of
     true ->
         {Status, Children2} = seedtree_insert_children(Children, Node),
         {Status, [{Mbr, Meta, Children2}|T]};
@@ -919,3 +921,4 @@ chunk_list(Fun, [H|T], Size, _Cnt, Chunk, Result) ->
     Entry = Fun(lists:reverse(Chunk)),
     %chunk_list(Fun, T, Size, 1, [H], Entry ++ Result).
     chunk_list(Fun, T, Size, 1, [H], [Entry|Result]).
+

@@ -16,7 +16,7 @@
 -export([index_file/3, compaction_file/3, open_file/1]).
 -export([delete_files/3, delete_index_file/3, delete_compaction_file/3]).
 -export([reset_index/3]).
--export([get_row_count/1, fold/5]).
+-export([get_row_count/1, fold/5, fold/7]).
 -export([get_req_handler/1, hexsig/1]).
 -export([from_geojson/1, to_geojson/1, make_bbox/2, make_bbox/3]).
 -export([ddoc_to_gcst/2]).
@@ -274,6 +274,19 @@ fold(Idx, Fun, InitAcc, BBox, Bounds) ->
     ),
     {ok, Acc2}.
 
+% TODO probably need to do a cleaning here for expand_dup
+fold(Index, FoldFun, InitAcc, N, QueryGeom, Bounds, Spherical) ->
+    WrapperFun = fun(Node, Acc) ->
+        Expanded = expand_dups([Node], []),
+        lists:foldl(fun(E, {ok, Acc2}) ->
+            FoldFun(E, Acc2)
+        end, {ok, Acc}, Expanded)
+    end,
+    {_State, Acc} = vtree:knn(
+        Index#gcidx.fd, Index#gcidx.vtree, N, QueryGeom,
+        {WrapperFun, InitAcc}, Bounds, Spherical),
+    {ok, Acc}.
+
 
 fold_fun(_Fun, [], Acc) ->
     {ok, Acc};
@@ -284,9 +297,14 @@ fold_fun(Fun, [Item | Rest], Acc0) ->
     end.
 
 
+% TODO Need to conciliate this validation
+% with the one in the httpd module
 validate_args(Args) ->
+
     case Args#gcargs.bbox of
        BBox when is_tuple(BBox), size(BBox) == 4 -> ok;
+       % bbox can be undefined if it's a knn query
+       undefined -> ok;
        _ -> gcerror(<<"Invalid value for `bbox`">>)
     end,
 
