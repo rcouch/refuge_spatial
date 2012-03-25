@@ -1,9 +1,15 @@
-geocouch
---------
+refuge_spatial
+--------------
 
 2010-2011 (c) Volker Mische <volker.mische@gmail.com>
 2011 (c) Paul J. Davis <paul.joseph.davis@gmail.com>
 2011-2012 (c) Nicolas R Dufour <nrdufour@gmail.com>
 
+refuge_spatial is based on geocouch and released under the Apache 2 license.
+See the LICENSE file for the complete license.
+
 geocouch is released under the Apache 2 license. See the LICENSE file for
 the complete license.
+
+KNN Queries are based on the work done by Tobias Sauerwein located at
+https://github.com/tsauerwein/geocouch/tree/knn_1.2.x .
