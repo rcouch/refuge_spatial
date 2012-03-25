@@ -12,7 +12,7 @@ A working installation of CouchDB with corresponding source code.
 At least:
 
 * CouchDB 1.2.x
-* Refuge 0.3
+* Refuge 0.4
 
 
 Using GeoCouch
