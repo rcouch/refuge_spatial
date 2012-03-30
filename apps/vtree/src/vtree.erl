@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of geocouch released under the Apache license 2.
 %%% See the NOTICE for more information.
 
 
@@ -181,7 +181,7 @@ lookup(Fd, Pos, Bbox, FoldFunAndAcc, Bounds) when not is_list(Bbox) ->
 
 
 % k-nearest-neighbour search
-% Implements the algorithm described in "Distance Browsing in Spatial Databases" by 
+% Implements the algorithm described in "Distance Browsing in Spatial Databases" by
 % Hjaltason and Samet (http://www.cs.umd.edu/~hjs/pubs/incnear2.pdf) (figure 4, page 10).
 % Note that this implementation only uses the MBR of the geometries to calculate the
 % distance.
@@ -200,7 +200,7 @@ knn(Fd, Pos, N, QueryGeom, FoldFunAndAcc, Bounds, Spherical) ->
     {ok, Result}.
 
 knn2(Nodes, Fd, N, QueryGeom, Bounds, Spherical, {FoldFun, InitAcc}, Count) ->
-    % 'main loop': take the element/node with the currently 
+    % 'main loop': take the element/node with the currently
     % smallest distance from the priority queue
     case (Count >= N) or pqueue2:is_empty(Nodes) of
     true ->
@@ -255,7 +255,7 @@ processNodeKnn({inner, InnerNode}, Fd, QueryGeom, Bounds, Spherical, Nodes, {_, 
 
 distance(Point, Mbr, _, Spherical) when (Spherical) ->
     geom:sphere_distance(Point, Mbr);
-    
+
 distance(Point, Mbr, Bounds, _) ->
     geom:distance(Point, Mbr, Bounds).
 

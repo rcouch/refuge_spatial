@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of refuge_spatial released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
 
 -module(refuge_spatial_show).
@@ -8,6 +8,7 @@
 -export([handle_spatial_list_req/3]).
 
 -include_lib("couch/include/couch_db.hrl").
+-include_lib("couch_httpd/include/couch_httpd.hrl").
 -include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 -record(sacc, {
