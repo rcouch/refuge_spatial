@@ -1,22 +1,15 @@
-Refuge Spatial
-==============
+# Refuge Spatial
 
-Refuge Spatial is a fork of GeoCouch.
+This is a spatial extension for Rcouch based on Geocouch.
 
-GeoCouch is a spatial extension for Apache CouchDB, Couchbase and Refuge.
+**Features**:
 
-Prerequisites
--------------
+- Index GEOJSON geometries
+- Bounding Box search
+- k-nearest-neighbour (KNN) queries
+- lists functions
 
-A working installation of CouchDB with corresponding source code.
-At least:
-
-* CouchDB 1.2.x
-* Refuge 0.4
-
-
-Using GeoCouch
---------------
+## Usage
 
 Create a database:
 
@@ -50,8 +43,7 @@ If the parameter `spherical=true` is set, the [Haversine formula](http://en.wiki
 is used to calculate spherical distances for nearest-neighbour-queries. In this case the geometries are
 expected to use the coordinate system [WGS 84](http://en.wikipedia.org/wiki/WGS_84).
 
-The Design Document Function
-----------------------------
+## The Design Document Function
 
 function(doc) {
     if (doc.loc) {
@@ -70,8 +62,7 @@ of calculating it from the geometry (even if it's wrong, i.e. is not
 the actual bounding box).
 
 
-Bounding box search and the date line
--------------------------------------
+## Bounding box search and the date line
 
 A common problem when performing bounding box searches is the date
 line/poles. As the bounding box follows the GeoJSON specification,
@@ -124,8 +115,7 @@ to set the `plane_bounds` parameter when `spherical=true` is enabled.
     {"id":"brasilia","bbox":[-52.95,-10.65,-52.95,-10.65],"geometry":{"type":"Point","coordinates":[-52.95,-10.65]},"value":"brasilia"}
     ]}
 
-List function support
----------------------
+## List function support
 
 GeoCouch supports List functions just as CouchDB does for Views. This way
 you can output any arbitrary format, e.g. GeoRSS.
@@ -159,8 +149,7 @@ ID in parenthesis:
     curl -X GET 'http://localhost:5984/places/_design/listfunonly/_spatial/_list/wkt/main/points?bbox=-180,-90,180,90'
 
 
-Other supported query arguments
--------------------------------
+## Other supported query arguments
 
 ### stale ###
 `stale=ok` is supported. The spatial index won't be rebuilt even if
@@ -184,8 +173,7 @@ the query will return, not the geometry themselves.
 `skip` allows you to start to return the results at a certain offset.
 
 
-Compaction, cleanup and info
-----------------------------
+## Compaction, cleanup and info
 
 The API of GeoCouch's spatial indexes is similar to the one for the
 Views. Compaction of spatial indexes is per Design Document, thus:
