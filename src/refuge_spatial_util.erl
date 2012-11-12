@@ -45,6 +45,7 @@ get_index(Db, DDoc, SpatialName, Args0) ->
         {ok, _} = Resp -> Resp;
         Error -> throw(Error)
     end,
+    Ref = erlang:monitor(process, State#gcst.fd),
     UpdateAfterFun = fun() ->
         LastSeq = couch_db:get_update_seq(Db),
         catch couch_index:get_state(Pid, LastSeq)
@@ -55,7 +56,7 @@ get_index(Db, DDoc, SpatialName, Args0) ->
     end,
     Idx = extract_index(SpatialName, State#gcst.indexes),
     Sig = index_sig(Db, State, Idx, Args1),
-    {ok, Idx, Sig, Args1}.
+    {ok, {Idx, Ref}, Sig, Args1}.
 
 
 count(Idx, Args) ->
@@ -144,6 +145,7 @@ init_state(_Db, Fd, State, Header) ->
 
     State#gcst{
         fd=Fd,
+        fd_monitor=erlang:monitor(process, Fd),
         update_seq=Seq,
         purge_seq=PurgeSeq,
         id_btree=IdBtree,

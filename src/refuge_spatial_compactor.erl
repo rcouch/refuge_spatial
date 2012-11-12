@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of refuge_spatial released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
 
 
@@ -148,8 +148,8 @@ swap_compacted(OldState, NewState) ->
     IndexFName = refuge_spatial_util:index_file(RootDir, DbName, Sig),
     CompactFName = refuge_spatial_util:compaction_file(RootDir, DbName, Sig),
 
-    io:format("~p~n~p~n", [IndexFName, CompactFName]),
     couch_file:close(OldState#gcst.fd),
+    erlang:demonitor(OldState#gcst.fd_monitor, [flush]),
     ok = couch_file:delete(RootDir, IndexFName),
     ok = file:rename(CompactFName, IndexFName),
 

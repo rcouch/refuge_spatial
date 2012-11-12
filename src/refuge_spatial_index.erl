@@ -89,6 +89,7 @@ open(Db, State) ->
     end.
 
 close(State) ->
+    erlang:demonitor(State#gcst.fd_monitor, [flush]),
     couch_file:close(State#gcst.fd).
 
 

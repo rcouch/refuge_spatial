@@ -16,6 +16,7 @@
 -record(gcst, {
         sig=nil,
         fd=nil,
+        fd_monitor,
         db_name,
         idx_name,
         language,

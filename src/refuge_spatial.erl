@@ -37,13 +37,17 @@ spatial_query(Db, DDoc, SName, Args) ->
 spatial_query(Db, DDoc, SName, Args, Callback, Acc) when is_list(Args) ->
     spatial_query(Db, DDoc, SName, to_gcargs(Args), Callback, Acc);
 spatial_query(Db, DDoc, SName, Args0, Callback, Acc0) ->
-    {ok, Idx, Sig, Args} = refuge_spatial_util:get_index(Db, DDoc,
+    {ok, {Idx, Ref}, Sig, Args} = refuge_spatial_util:get_index(Db, DDoc,
                                                          SName, Args0),
-    {ok, Acc1} = case Args#gcargs.preflight_fun of
-        PFFun when is_function(PFFun, 2) -> PFFun(Sig, Acc0);
-        _ -> {ok, Acc0}
-    end,
-    spatial_fold(Db, Idx, Args, Callback, Acc1).
+    try
+        {ok, Acc1} = case Args#gcargs.preflight_fun of
+            PFFun when is_function(PFFun, 2) -> PFFun(Sig, Acc0);
+            _ -> {ok, Acc0}
+        end,
+        spatial_fold(Db, Idx, Args, Callback, Acc1)
+    after
+        erlang:demonitor(Ref, [flush])
+    end.
 
 
 default_cb(complete, Acc) ->
@@ -53,9 +57,13 @@ default_cb(Row, Acc) ->
 
 
 count(Db, DDoc, SName, Args0) ->
-    {ok, Idx, _, Args} = refuge_spatial_util:get_index(Db, DDoc, SName,
+    {ok, {Idx, Ref}, _, Args} = refuge_spatial_util:get_index(Db, DDoc, SName,
                                                        Args0),
-    refuge_spatial_util:count(Idx, Args).
+    try
+        refuge_spatial_util:count(Idx, Args)
+    after
+        erlang:demonitor(Ref, [flush])
+    end.
 
 
 get_info(Db, DDoc) ->
