@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of refuge_spatial released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
 
 -module(refuge_spatial).
@@ -12,14 +12,15 @@
 
 
 -record(gcacc, {
-    db,
-    idx,
-    meta_sent=false,
-    callback,
-    user_acc,
-    last_go=ok,
-    args
-}).
+        db,
+        idx,
+        limit,
+        skip,
+        meta_sent=false,
+        callback,
+        user_acc,
+        last_go=ok,
+        args}).
 
 
 spatial_query(Db, DDoc, SName) ->
@@ -27,7 +28,8 @@ spatial_query(Db, DDoc, SName) ->
 
 
 spatial_query(Db, DDoc, SName, Args) when is_list(Args) ->
-    spatial_query(Db, DDoc, SName, to_gcargs(Args), fun default_cb/2, []);
+    spatial_query(Db, DDoc, SName, to_gcargs(Args), fun default_cb/2,
+                  []);
 spatial_query(Db, DDoc, SName, Args) ->
     spatial_query(Db, DDoc, SName, Args, fun default_cb/2, []).
 
@@ -35,7 +37,8 @@ spatial_query(Db, DDoc, SName, Args) ->
 spatial_query(Db, DDoc, SName, Args, Callback, Acc) when is_list(Args) ->
     spatial_query(Db, DDoc, SName, to_gcargs(Args), Callback, Acc);
 spatial_query(Db, DDoc, SName, Args0, Callback, Acc0) ->
-    {ok, Idx, Sig, Args} = refuge_spatial_util:get_index(Db, DDoc, SName, Args0),
+    {ok, Idx, Sig, Args} = refuge_spatial_util:get_index(Db, DDoc,
+                                                         SName, Args0),
     {ok, Acc1} = case Args#gcargs.preflight_fun of
         PFFun when is_function(PFFun, 2) -> PFFun(Sig, Acc0);
         _ -> {ok, Acc0}
@@ -50,7 +53,8 @@ default_cb(Row, Acc) ->
 
 
 count(Db, DDoc, SName, Args0) ->
-    {ok, Idx, _, Args} = refuge_spatial_util:get_index(Db, DDoc, SName, Args0),
+    {ok, Idx, _, Args} = refuge_spatial_util:get_index(Db, DDoc, SName,
+                                                       Args0),
     refuge_spatial_util:count(Idx, Args).
 
 
@@ -84,7 +88,9 @@ spatial_fold(Db, Idx, Args, Callback, Acc) when
         spherical=Spherical,
         bounds=Bounds
     } = Args,
-    {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0, N, QueryGeom, Bounds, Spherical),
+    {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0,
+                                          N, QueryGeom, Bounds,
+                                          Spherical),
     finish_fold(Acc1, Idx);
 
 spatial_fold(Db, Idx, Args, Callback, Acc) ->
@@ -160,6 +166,7 @@ to_gcargs(KeyList) ->
 
 lookup_index(Key) ->
     Index = lists:zip(
-        record_info(fields, gcargs), lists:seq(2, record_info(size, gcargs))
+        record_info(fields, gcargs), lists:seq(2, record_info(size,
+                                                              gcargs))
     ),
     couch_util:get_value(Key, Index).

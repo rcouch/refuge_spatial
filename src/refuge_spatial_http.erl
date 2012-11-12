@@ -96,7 +96,8 @@ design_doc_spatial(Req, Db, DDoc, SpatialName) ->
             {ok, Resp} = couch_httpd:etag_maybe(Req, fun() ->
                 SAcc0 = #sacc{db=Db, req=Req},
                 CB = fun spatial_cb/2,
-                refuge_spatial:spatial_query(Db, DDoc, SpatialName, Args, CB, SAcc0)
+                refuge_spatial:spatial_query(Db, DDoc, SpatialName,
+                                             Args, CB, SAcc0)
             end),
             case is_record(Resp, sacc) of
                 true -> {ok, Resp#sacc.resp};
@@ -107,7 +108,8 @@ design_doc_spatial(Req, Db, DDoc, SpatialName) ->
 
 spatial_cb({meta, Meta}, #sacc{resp=undefined}=Acc) ->
     Headers = [{"ETag", Acc#sacc.etag}],
-    {ok, Resp} = couch_httpd:start_json_response(Acc#sacc.req, 200, Headers),
+    {ok, Resp} = couch_httpd:start_json_response(Acc#sacc.req, 200,
+                                                 Headers),
     Parts = case couch_util:get_value(total, Meta) of
         undefined -> [];
         Total -> [io_lib:format("\"total_rows\":~p", [Total])]
@@ -120,12 +122,14 @@ spatial_cb({meta, Meta}, #sacc{resp=undefined}=Acc) ->
     {ok, Acc#sacc{resp=Resp, prepend=""}};
 spatial_cb({row, Row}, #sacc{resp=undefined}=Acc) ->
     Headers = [{"ETag", Acc#sacc.etag}],
-    {ok, Resp} = couch_httpd:start_json_response(Acc#sacc.req, 200, Headers),
+    {ok, Resp} = couch_httpd:start_json_response(Acc#sacc.req, 200,
+                                                 Headers),
     couch_httpd:send_chunk(Resp, ["{\"rows\":[\r\n", row_to_json(Row)]),
     {ok, #sacc{resp=Resp, prepend=",\r\n"}};
 spatial_cb({row, Row}, Acc) ->
     % Adding another row
-    couch_httpd:send_chunk(Acc#sacc.resp, [Acc#sacc.prepend, row_to_json(Row)]),
+    couch_httpd:send_chunk(Acc#sacc.resp, [Acc#sacc.prepend,
+                                           row_to_json(Row)]),
     {ok, Acc#sacc{prepend=",\r\n"}};
 spatial_cb(complete, #sacc{resp=undefined}=Acc) ->
     % Nothing in view
@@ -217,7 +221,8 @@ parse_qs(Key, Val, Args) ->
         "spherical" when Val == "true" ->
             Args#gcargs{spherical=true};
         "spherical" ->
-            throw({query_parse_error, <<"Invalid value for `spherical`">>});
+            throw({query_parse_error, <<"Invalid value for
+                                      `spherical`">>});
         Key ->
             Args#gcargs{extra=[{Key, Val} | Args#gcargs.extra]}
     end.

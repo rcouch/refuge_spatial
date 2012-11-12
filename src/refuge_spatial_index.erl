@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of refuge_spatial released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
 
 
@@ -10,7 +10,8 @@
 
 -export([get/2]).
 -export([init/2, open/2, close/1, reset/1, delete/1]).
--export([start_update/3, purge/4, process_doc/3, finish_update/1, commit/1]).
+-export([start_update/3, purge/4, process_doc/3, finish_update/1,
+         commit/1]).
 -export([compact/3, swap_compacted/2]).
 
 -include_lib("refuge_spatial/include/refuge_spatial.hrl").
@@ -29,11 +30,13 @@ get(Property, State) ->
             State#gcst.purge_seq;
         update_options ->
             Opts = State#gcst.design_opts,
-            Opts1 = case couch_util:get_value(<<"include_design">>, Opts, false) of
+            Opts1 = case couch_util:get_value(<<"include_design">>,
+                                              Opts, false) of
                 true -> [include_design];
                 _ -> []
             end,
-            Opts2 = case couch_util:get_value(<<"local_seq">>, Opts, false) of
+            Opts2 = case couch_util:get_value(<<"local_seq">>, Opts,
+                                              false) of
                 true -> [local_seq];
                 _ -> []
             end,
@@ -48,7 +51,8 @@ get(Property, State) ->
             } = State,
             {ok, Size} = couch_file:bytes(Fd),
             {ok, [
-                {signature, list_to_binary(refuge_spatial_util:hexsig(Sig))},
+                {signature,
+                 list_to_binary(refuge_spatial_util:hexsig(Sig))},
                 {language, Lang},
                 {disk_size, Size},
                 {update_seq, UpdateSeq},
@@ -73,12 +77,14 @@ open(Db, State) ->
             case (catch couch_file:read_header(Fd)) of
                 {ok, {Sig, Header}} ->
                     % Matching view signatures.
-                    {ok, refuge_spatial_util:init_state(Db, Fd, State, Header)};
+                    {ok, refuge_spatial_util:init_state(Db, Fd, State,
+                                                        Header)};
                 _ ->
                     {ok, refuge_spatial_util:reset_index(Db, Fd, State)}
             end;
         Error ->
-            (catch refuge_spatial_util:delete_index_file(RootDir, DbName, Sig)),
+            (catch refuge_spatial_util:delete_index_file(RootDir,
+                                                         DbName, Sig)),
             Error
     end.
 
@@ -123,6 +129,7 @@ swap_compacted(OldState, NewState) ->
 
 reset(State) ->
     couch_util:with_db(State#gcst.db_name, fun(Db) ->
-        NewState = refuge_spatial_util:reset_index(Db, State#gcst.fd, State),
+        NewState = refuge_spatial_util:reset_index(Db, State#gcst.fd,
+                                                   State),
         {ok, NewState}
     end).

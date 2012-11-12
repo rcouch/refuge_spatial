@@ -30,7 +30,8 @@ handle_spatial_list_req(#httpd{method='GET'}=Req, Db, DDoc) ->
             {ok, SDDoc} = couch_db:open_doc(Db, SDocId, [ejson_body]),
             handle_spatial_list(Req, Db, DDoc, LName, SDDoc, SName);
         _ ->
-            couch_httpd:send_error(Req, 404, <<"list_error">>, <<"Bad path.">>)
+            couch_httpd:send_error(Req, 404, <<"list_error">>, <<"Bad
+                                                               path.">>)
     end;
 handle_spatial_list_req(Req, _Db, _DDoc) ->
     couch_httpd:send_method_not_allowed(Req, "GET,HEAD").
@@ -53,7 +54,8 @@ handle_spatial_list(Req, Db, DDoc, LName, SDDoc, SName) ->
     couch_httpd:etag_maybe(Req, fun() ->
         couch_query_servers:with_ddoc_proc(DDoc, fun(QServer) ->
             Acc = #sacc{db=Db, req=Req, qserver=QServer, lname=LName},
-            refuge_spatial:spatial_query(Db, SDDoc, SName, Args, fun list_cb/2, Acc)
+            refuge_spatial:spatial_query(Db, SDDoc, SName, Args, fun
+                                    list_cb/2, Acc)
         end)
     end).
 
@@ -78,7 +80,8 @@ list_cb(complete, Acc) ->
         nil -> {ok, #sacc{resp=Resp}} = start_list_resp({[]}, Acc);
         Resp -> Resp
     end,
-    [<<"end">>, Data] = couch_query_servers:proc_prompt(Proc, [<<"list_end">>]),
+    [<<"end">>, Data] = couch_query_servers:proc_prompt(Proc,
+                                                        [<<"list_end">>]),
     send_non_empty_chunk(Resp, Data),
     couch_httpd:last_chunk(Resp),
     {ok, Resp}.
@@ -88,8 +91,8 @@ start_list_resp(Head, Acc) ->
     JsonReq = couch_httpd_external:json_req_obj(Req, Db),
 
     [<<"start">>, Chunk, JsonResp] = couch_query_servers:ddoc_proc_prompt(
-        QServer, [<<"lists">>, LName], [Head, JsonReq]
-    ),
+        QServer, [<<"lists">>, LName], [Head, JsonReq]),
+
     JsonResp2 = apply_etag(JsonResp, ETag),
     #extern_resp_args{
         code = Code,
@@ -99,7 +102,8 @@ start_list_resp(Head, Acc) ->
     JsonHeaders = couch_httpd_external:default_or_content_type(
         CType, ExtHeaders
     ),
-    {ok, Resp} = couch_httpd:start_chunked_response(Req, Code, JsonHeaders),
+    {ok, Resp} = couch_httpd:start_chunked_response(Req, Code,
+                                                    JsonHeaders),
     send_non_empty_chunk(Resp, Chunk),
     {ok, Acc#sacc{resp=Resp}}.
 
@@ -117,7 +121,8 @@ send_list_row(Row, #sacc{qserver={Proc, _}, resp=Resp}=Acc) ->
         undefined -> [];
         Val -> [{value, Val}]
     end,
-    try couch_query_servers:proc_prompt(Proc, [<<"list_row">>, {RowObj}]) of
+    try couch_query_servers:proc_prompt(Proc, [<<"list_row">>,
+                                               {RowObj}]) of
         [<<"chunks">>, Chunk] ->
             send_non_empty_chunk(Resp, Chunk),
             {ok, Acc};
@@ -176,7 +181,8 @@ json_apply_field({Key, NewValue}, [{Key, _OldVal} | Headers], Acc) ->
     json_apply_field({Key, NewValue}, Headers, Acc);
 json_apply_field({Key, NewValue}, [{OtherKey, OtherVal} | Headers], Acc) ->
     % something else is next, leave it alone.
-    json_apply_field({Key, NewValue}, Headers, [{OtherKey, OtherVal} | Acc]);
+    json_apply_field({Key, NewValue}, Headers, [{OtherKey, OtherVal} |
+                                                Acc]);
 json_apply_field({Key, NewValue}, [], Acc) ->
     % end of list, add ours
     {[{Key, NewValue}|Acc]}.

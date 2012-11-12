@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of refuge_spatial released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
 
 -module(refuge_spatial_util).
@@ -78,7 +78,8 @@ ddoc_to_gcst(DbName, #doc{id=Id, body={Fields}}) ->
     end,
 
     RootDir = couch_config:get("couchdb", "index_dir"),
-    Language = couch_util:get_value(<<"language">>, Fields, <<"javascript">>),
+    Language = couch_util:get_value(<<"language">>, Fields,
+                                    <<"javascript">>),
     {DesignOpts} = couch_util:get_value(<<"options">>, Fields, {[]}),
     {RawIndexes} = couch_util:get_value(<<"spatial">>, Fields, {[]}),
     {RawViews} = couch_util:get_value(<<"views">>, Fields, {[]}),
@@ -108,7 +109,8 @@ set_index_sig(State) ->
         language=Language,
         design_opts=DesignOpts
     } = State,
-    SigInfo = {Idxs, Language, DesignOpts, sort_lib(Lib), ?REFUGE_SPATIAL_DISK_VSN},
+    SigInfo = {Idxs, Language, DesignOpts, sort_lib(Lib),
+               ?REFUGE_SPATIAL_DISK_VSN},
     State#gcst{sig=couch_util:md5(term_to_binary(SigInfo))}.
 
 
