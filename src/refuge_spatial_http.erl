@@ -212,6 +212,10 @@ parse_qs(Key, Val, Args) ->
         "plane_bounds" ->
             Bounds = list_to_tuple(?JSON_DECODE("[" ++ Val ++ "]")),
             Args#gcargs{bounds=Bounds};
+        "limit" ->
+            Args#gcargs{limit=parse_int(Val)};
+        "skip" ->
+            Args#gcargs{skip=parse_int(Val)};
         "n" ->
             [N] = ?JSON_DECODE("[" ++ Val ++ "]"),
             Args#gcargs{n=N};
@@ -225,4 +229,15 @@ parse_qs(Key, Val, Args) ->
                                       `spherical`">>});
         Key ->
             Args#gcargs{extra=[{Key, Val} | Args#gcargs.extra]}
+    end.
+
+
+parse_int(Val) ->
+    case (catch list_to_integer(Val)) of
+        IntVal when is_integer(IntVal) ->
+            IntVal;
+        _ ->
+            Msg = io_lib:format("Invalid value for integer parameter: ~p",
+                                [Val]),
+            throw({query_parse_error, ?l2b(Msg)})
     end.

@@ -75,37 +75,49 @@ cleanup(Db) ->
 spatial_fold(Db, Idx, Args, Callback, Acc) when
     ((Args#gcargs.n /= nil) and
      (Args#gcargs.q /= nil)) ->
-    Acc0 = #gcacc{
-        db=Db,
-        idx=Idx,
-        callback=Callback,
-        user_acc=Acc,
-        args=Args
-    },
     #gcargs{
+        limit=Limit,
+        skip=Skip,
         n=N,
         q=QueryGeom,
         spherical=Spherical,
         bounds=Bounds
     } = Args,
+
+    Acc0 = #gcacc{
+        db=Db,
+        idx=Idx,
+        callback=Callback,
+        user_acc=Acc,
+        args=Args,
+        limit=Limit,
+        skip=Skip
+    },
     {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0,
                                           N, QueryGeom, Bounds,
                                           Spherical),
     finish_fold(Acc1, Idx);
 
 spatial_fold(Db, Idx, Args, Callback, Acc) ->
+    #gcargs{
+        limit=Limit,
+        skip=Skip,
+        bbox=BBox,
+        bounds=Bounds
+    } = Args,
+
     Acc0 = #gcacc{
         db=Db,
         idx=Idx,
         callback=Callback,
         user_acc=Acc,
-        args=Args
+        args=Args,
+        limit=Limit,
+        skip=Skip
     },
-    #gcargs{
-        bbox=BBox,
-        bounds=Bounds
-    } = Args,
-    {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0, BBox,Bounds),
+
+    {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0,
+                                          BBox, Bounds),
     finish_fold(Acc1, Idx).
 
 
@@ -122,14 +134,19 @@ spatial_fold(Row, #gcacc{meta_sent=false}=Acc) ->
         ok -> spatial_fold(Row, Acc1);
         stop -> {stop, Acc1}
     end;
+spatial_fold(_KVS, #gcacc{skip=N}=Acc) when N > 0 ->
+    {ok, Acc#gcacc{skip=N-1, last_go=ok}};
+spatial_fold(_KVS, #gcacc{limit=0}=Acc) ->
+    {stop, Acc};
 spatial_fold({{BBox, DocId}, {Geom, Val}}, Acc) ->
     #gcacc{
         callback=Callback,
-        user_acc=UAcc0
+        user_acc=UAcc0,
+        limit=Limit
     } = Acc,
     Row = [{id, DocId}, {bbox, BBox}, {geometry, Geom}, {val, Val}],
     {Go, UAcc1} = Callback({row, Row}, UAcc0),
-    {Go, Acc#gcacc{user_acc=UAcc1, last_go=Go}}.
+    {Go, Acc#gcacc{user_acc=UAcc1, last_go=Go, limit=Limit-1}}.
 
 
 finish_fold(#gcacc{last_go=ok}=Acc, Idx) ->

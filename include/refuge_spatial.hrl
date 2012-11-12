@@ -14,60 +14,58 @@
 
 
 -record(gcst, {
-    sig=nil,
-    fd=nil,
-    db_name,
-    idx_name,
-    language,
-    design_opts=[],
-    lib,
-    indexes,
-    id_btree=nil,
-    update_seq=0,
-    purge_seq=0,
-    root_dir=[],
+        sig=nil,
+        fd=nil,
+        db_name,
+        idx_name,
+        language,
+        design_opts=[],
+        lib,
+        indexes,
+        id_btree=nil,
+        update_seq=0,
+        purge_seq=0,
+        root_dir=[],
 
-    first_build,
-    partial_resp_pid,
-    doc_acc,
-    doc_queue,
-    write_queue,
-    query_server=nil
-}).
+        first_build,
+        partial_resp_pid,
+        doc_acc,
+        doc_queue,
+        write_queue,
+        query_server=nil}).
 
 
 -record(gcidx, {
-    id_num,
-    update_seq=0,
-    purge_seq=0,
-    idx_names=[],
-    def=nil,
-    fd,
-    vtree=nil,
-    vtree_height=0
-}).
+        id_num,
+        update_seq=0,
+        purge_seq=0,
+        idx_names=[],
+        def=nil,
+        fd,
+        vtree=nil,
+        vtree_height=0}).
 
 
 -record(gcheader, {
-    update_seq=0,
-    purge_seq=0,
-    id_btree_state=nil,
-    idx_states=[],
-    disk_version = ?REFUGE_SPATIAL_DISK_VSN
-}).
+        update_seq=0,
+        purge_seq=0,
+        id_btree_state=nil,
+        idx_states=[],
+        disk_version = ?REFUGE_SPATIAL_DISK_VSN}).
 
 
 -record(gcargs, {
-    bbox,
-    stale,
-    count=false,
-    bounds=nil,
-    % number of nearest neighbours
-    n=nil,
-    % search point for a nearest neighbour query
-    q=nil,
-    % use spherical distances instead of cartesian
-    spherical=false,
-    preflight_fun,
-    extra=[]
-}).
+        limit=10000000000,
+        skip = 0,
+        bbox,
+        stale,
+        count=false,
+        bounds=nil,
+        % number of nearest neighbours
+        n=nil,
+        % search point for a nearest neighbour query
+        q=nil,
+        % use spherical distances instead of cartesian
+        spherical=false,
+        preflight_fun,
+        extra=[]}).

@@ -175,6 +175,14 @@ the query will return, not the geometry themselves.
 
     {"count":1}
 
+### limit ###
+
+`limit` limts the number of results returned
+
+### skip ###
+
+`skip` allows you to start to return the results at a certain offset.
+
 
 Compaction, cleanup and info
 ----------------------------
