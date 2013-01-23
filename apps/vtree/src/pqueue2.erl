@@ -10,13 +10,13 @@
 %%% @end
 %%%
 %%% BSD LICENSE
-%%% 
+%%%
 %%% Copyright (c) 2011, Michael Truog <mjtruog at gmail dot com>
 %%% All rights reserved.
-%%% 
+%%%
 %%% Redistribution and use in source and binary forms, with or without
 %%% modification, are permitted provided that the following conditions are met:
-%%% 
+%%%
 %%%     * Redistributions of source code must retain the above copyright
 %%%       notice, this list of conditions and the following disclaimer.
 %%%     * Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 %%%     * The name of the author may not be used to endorse or promote
 %%%       products derived from this software without specific prior
 %%%       written permission
-%%% 
+%%%
 %%% THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
 %%% CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
 %%% INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -107,8 +107,8 @@ in(Value, P, H) ->
 
 is_empty(empty) ->
     true;
-is_empty({_, empty, empty, queue, Queue}) ->
-    queue:is_empty(Queue);
+is_empty({_, HL, HR, queue, Queue}) ->
+    is_empty(HL) andalso is_empty(HR) andalso queue:is_empty(Queue);
 is_empty(_) ->
     false.
 
@@ -471,4 +471,17 @@ merge({P, HL1, HR1, queue, Queue}, {P, HL2, HR2, element, Value}) ->
 merge({P, HL1, HR1, element, Value}, {P, HL2, HR2, queue, Queue}) ->
     {P, merge(HL1, HR1), merge(HL2, HR2), queue, queue:in(Value, Queue)}.
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
 
+internal_test_() ->
+    [
+        {"internal tests", ?_assertEqual(ok, test())}
+    ].
+
+proper_test_() ->
+    {timeout, 600, [
+        {"proper tests", ?_assert(pqueue_proper:qc_pq2())}
+    ]}.
+
+-endif.
