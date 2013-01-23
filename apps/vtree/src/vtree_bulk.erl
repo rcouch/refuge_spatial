@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of geocouch released under the Apache license 2.
 %%% See the NOTICE for more information.
 
 -module(vtree_bulk).
@@ -8,8 +8,7 @@
 -include_lib("couch/include/couch_db.hrl").
 
 -ifndef(makecheck).
--define(MAX_FILLED, 4).
-%-define(MAX_FILLED, 40).
+-define(MAX_FILLED, 40).
 -else.
 -define(MAX_FILLED, 4).
 -compile(export_all).
