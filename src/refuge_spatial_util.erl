@@ -131,7 +131,8 @@ init_state(_Db, Fd, State, Header) ->
         id_btree_state=IdBtreeState,
         idx_states=IdxStates
     } = Header,
-    {ok, IdBtree} = couch_btree:open(IdBtreeState, Fd),
+    {ok, IdBtree} = couch_btree:open(IdBtreeState, Fd,
+                                     [{compression, couch_db:compression(Db)}]),
 
     Idxs2 = lists:zipwith(fun(St, Idx) ->
         Idx#gcidx{
