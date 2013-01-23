@@ -123,7 +123,7 @@ init_state(Db, Fd, #gcst{indexes=Idxs}=State, nil) ->
         idx_states=[#gcidx{} || _ <- Idxs]
     },
     init_state(Db, Fd, State, Header);
-init_state(_Db, Fd, State, Header) ->
+init_state(Db, Fd, State, Header) ->
     #gcst{indexes=Idxs} = State,
     #gcheader{
         update_seq=Seq,
