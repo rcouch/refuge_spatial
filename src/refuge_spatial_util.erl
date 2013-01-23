@@ -200,11 +200,11 @@ index_sig(_Db, State, Idx, Args0) ->
 
 
 index_file(RootDir, DbName, Sig) ->
-    design_root(RootDir, DbName) ++ hexsig(Sig) ++ ".view".
+    design_root(RootDir, DbName) ++ hexsig(Sig) ++ ".spatial".
 
 
 compaction_file(RootDir, DbName, Sig) ->
-    design_root(RootDir, DbName) ++ hexsig(Sig) ++ ".compact.view".
+    design_root(RootDir, DbName) ++ hexsig(Sig) ++ ".compact.spatial".
 
 
 design_root(RootDir, DbName) ->
