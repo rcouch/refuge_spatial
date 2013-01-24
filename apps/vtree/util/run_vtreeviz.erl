@@ -1,8 +1,7 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of geocouch released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
-
 
 -module(run_vtreeviz).
 -export([run/0]).

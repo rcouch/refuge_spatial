@@ -10,13 +10,3 @@ See the LICENSE file for the complete license.
 
 geocouch is released under the Apache 2 license. See the LICENSE file for
 the complete license.
-
-KNN Queries are based on the work done by Tobias Sauerwein located at
-https://github.com/tsauerwein/geocouch/tree/knn_1.2.x .
-
-
-This product also includes the following third-party components:
-
-* pqueue.erl (https://github.com/okeuday/pqueue)
-
-  Copyright (c) 2011, Michael Truog <mjtruog at gmail dot com>

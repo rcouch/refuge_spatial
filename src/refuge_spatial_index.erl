@@ -10,39 +10,34 @@
 
 -export([get/2]).
 -export([init/2, open/2, close/1, reset/1, delete/1]).
--export([start_update/3, purge/4, process_doc/3, finish_update/1,
-         commit/1]).
+-export([start_update/3, purge/4, process_doc/3, finish_update/1, commit/1]).
 -export([compact/3, swap_compacted/2]).
 
 -include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
+
 get(Property, State) ->
     case Property of
         db_name ->
-            State#gcst.db_name;
+            State#spatial_state.db_name;
         idx_name ->
-            State#gcst.idx_name;
+            State#spatial_state.idx_name;
         signature ->
-            State#gcst.sig;
+            State#spatial_state.sig;
         update_seq ->
-            State#gcst.update_seq;
+            State#spatial_state.update_seq;
         purge_seq ->
-            State#gcst.purge_seq;
+            State#spatial_state.purge_seq;
         update_options ->
-            Opts = State#gcst.design_opts,
-            Opts1 = case couch_util:get_value(<<"include_design">>,
-                                              Opts, false) of
-                true -> [include_design];
-                _ -> []
-            end,
-            Opts2 = case couch_util:get_value(<<"local_seq">>, Opts,
-                                              false) of
-                true -> [local_seq];
-                _ -> []
-            end,
-            Opts1 ++ Opts2;
+            %Opts = State#spatual_state.design_options,
+            % NOTE vmx 2012-10-19: Not supported at the moment
+            %IncDesign = couch_util:get_value(<<"include_design">>, Opts, false),
+            %LocalSeq = couch_util:get_value(<<"local_seq">>, Opts, false),
+            %if IncDesign -> [include_design]; true -> [] end
+            %    ++ if LocalSeq -> [local_seq]; true -> [] end;
+            [];
         info ->
-            #gcst{
+            #spatial_state{
                 fd = Fd,
                 sig = Sig,
                 language = Lang,
@@ -51,8 +46,7 @@ get(Property, State) ->
             } = State,
             {ok, Size} = couch_file:bytes(Fd),
             {ok, [
-                {signature,
-                 list_to_binary(refuge_spatial_util:hexsig(Sig))},
+                {signature, list_to_binary(couch_index_util:hexsig(Sig))},
                 {language, Lang},
                 {disk_size, Size},
                 {update_seq, UpdateSeq},
@@ -62,48 +56,65 @@ get(Property, State) ->
             throw({unknown_index_property, Other})
     end.
 
+
 init(Db, DDoc) ->
-    refuge_spatial_util:ddoc_to_gcst(couch_db:name(Db), DDoc).
+    refuge_spatial_util:ddoc_to_spatial_state(couch_db:name(Db), DDoc).
+
 
 open(Db, State) ->
-    #gcst{
+    #spatial_state{
         db_name=DbName,
-        sig=Sig,
-        root_dir=RootDir
+        sig=Sig
     } = State,
-    IndexFName = refuge_spatial_util:index_file(RootDir, DbName, Sig),
+    IndexFName = refuge_spatial_util:index_file(DbName, Sig),
     case refuge_spatial_util:open_file(IndexFName) of
         {ok, Fd} ->
-            case (catch couch_file:read_header(Fd)) of
+            NewState = case (catch couch_file:read_header(Fd)) of
                 {ok, {Sig, Header}} ->
                     % Matching view signatures.
-                    {ok, refuge_spatial_util:init_state(Db, Fd, State,
-                                                        Header)};
+                    refuge_spatial_util:init_state(Db, Fd, State, Header);
                 _ ->
-                    {ok, refuge_spatial_util:reset_index(Db, Fd, State)}
-            end;
+                    refuge_spatial_util:reset_index(Db, Fd, State)
+            end,
+            {ok, NewState};
         Error ->
-            (catch refuge_spatial_util:delete_index_file(RootDir,
-                                                         DbName, Sig)),
+            (catch refuge_spatial_util:delete_files(DbName, Sig)),
             Error
     end.
 
+
 close(State) ->
-    erlang:demonitor(State#gcst.fd_monitor, [flush]),
-    couch_file:close(State#gcst.fd).
+    erlang:demonitor(State#spatial_state.fd_monitor),
+    couch_file:close(State#spatial_state.fd).
 
 
-delete(#gcst{db_name=DbName, sig=Sig, root_dir=RootDir}=State) ->
-    couch_file:close(State#gcst.fd),
-    catch refuge_spatial_util:delete_index_file(RootDir, DbName, Sig).
+delete(State) ->
+    #spatial_state{
+        fd=Fd,
+        db_name=DbName,
+        sig=Sig
+    } = State,
+    couch_file:close(Fd),
+    catch refuge_spatial_util:delete_files(DbName, Sig).
 
 
-purge(Db, PurgeSeq, PurgedIdRevs, State) ->
-    geoocouch_updater:purge_index(Db, PurgeSeq, PurgedIdRevs, State).
+reset(State) ->
+    #spatial_state{
+        fd=Fd,
+        db_name=DbName
+    } = State,
+    couch_util:with_db(DbName, fun(Db) ->
+        NewState = refuge_spatial_util:reset_index(Db, Fd, State),
+        {ok, NewState}
+    end).
 
 
-start_update(Partial, State, NumChanges) ->
-    refuge_spatial_updater:start_update(Partial, State, NumChanges).
+start_update(PartialDest, State, NumChanges) ->
+    refuge_spatial_updater:start_update(PartialDest, State, NumChanges).
+
+
+purge(_Db, _PurgeSeq, _PurgedIdRevs, _State) ->
+    throw("purge on spatial views isn't supported").
 
 
 process_doc(Doc, Seq, State) ->
@@ -115,9 +126,12 @@ finish_update(State) ->
 
 
 commit(State) ->
-    Header = {State#gcst.sig, refuge_spatial_util:make_header(State)},
-    couch_file:write_header(State#gcst.fd, Header),
-    couch_file:sync(State#gcst.fd).
+    #spatial_state{
+        sig=Sig,
+        fd=Fd
+    } = State,
+    Header = {Sig, refuge_spatial_util:make_header(State)},
+    couch_file:write_header(Fd, Header).
 
 
 compact(Db, State, Opts) ->
@@ -126,11 +140,3 @@ compact(Db, State, Opts) ->
 
 swap_compacted(OldState, NewState) ->
     refuge_spatial_compactor:swap_compacted(OldState, NewState).
-
-
-reset(State) ->
-    couch_util:with_db(State#gcst.db_name, fun(Db) ->
-        NewState = refuge_spatial_util:reset_index(Db, State#gcst.fd,
-                                                   State),
-        {ok, NewState}
-    end).

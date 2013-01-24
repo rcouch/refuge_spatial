@@ -1,6 +1,6 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of refuge_spatial released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
 
 -module(refuge_spatial_cleanup).
@@ -12,26 +12,29 @@
 
 
 run(Db) ->
-    IdxDir = couch_config:get("couchdb", "index_dir"),
+    RootDir = couch_index_util:root_dir(),
     DbName = couch_db:name(Db),
-    DbNameL = binary_to_list(DbName),
 
-    {ok, DesignDocs} = couch_db:get_design_docs(Db),
-    SigFiles = lists:foldl(fun(DDoc, SFAcc) ->
-        InitState = refuge_spatial_util:ddoc_to_gcst(DbName, DDoc),
-        Sig = InitState#gcst.sig,
-        IFName = refuge_spatial_util:index_file(IdxDir, DbName, Sig),
-        CFName = refuge_spatial_util:compaction_file(IdxDir, DbName, Sig),
-        [IFName, CFName | SFAcc]
-    end, [], [DD || DD <- DesignDocs, DD#doc.deleted == false]),
+    DesignDocs = couch_db:get_design_docs(Db),
+    SigFiles = lists:foldl(fun(DDocInfo, SigFilesAcc) ->
+        {ok, DDoc} = couch_db:open_doc_int(Db, DDocInfo, [ejson_body]),
+        {ok, InitState} = refuge_spatial_util:ddoc_to_spatial_state(
+            DbName, DDoc),
+        Sig = InitState#spatial_state.sig,
+        IndexFilename = refuge_spatial_util:index_file(DbName, Sig),
+        CompactFilename = refuge_spatial_util:compaction_file(DbName, Sig),
+        [IndexFilename, CompactFilename | SigFilesAcc]
+    end, [], [DD || DD <- DesignDocs, DD#full_doc_info.deleted == false]),
 
-    DiskFiles = filelib:wildcard(IdxDir ++ "/." ++ DbNameL ++ "_design/*"),
+    IdxDir = couch_index_util:index_dir(spatial, DbName),
+    DiskFiles = filelib:wildcard(filename:join(IdxDir, "*")),
 
+    % We need to delete files that have no ddoc.
     ToDelete = DiskFiles -- SigFiles,
 
     lists:foreach(fun(FN) ->
-        ?LOG_DEBUG("Deleting stale spatial file: ~s", [FN]),
-        couch_file:delete(IdxDir, FN, false)
+        ?LOG_DEBUG("Deleting stale spatial view file: ~s", [FN]),
+        couch_file:delete(RootDir, FN, false)
     end, ToDelete),
 
     ok.

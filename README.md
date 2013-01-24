@@ -6,10 +6,10 @@ This is a spatial extension for Rcouch based on Geocouch.
 
 - Index GEOJSON geometries
 - Bounding Box search
-- k-nearest-neighbour (KNN) queries
 - lists functions
 
-## Usage
+Using GeoCouch
+--------------
 
 Create a database:
 
@@ -34,16 +34,8 @@ It should return:
     {"id":"augsburg","bbox":[10.898333,48.371667,10.898333,48.371667],"geometry":{"type":"Point","coordinates":[10.898333,48.371667]},"value":["augsburg",[10.898333,48.371667]]}
     ]}
 
-Or trigger a k-nearest-neighbour-query to request the n nearest geometries 
-relative to a given query point:
-
-    curl -X GET 'http://localhost:5984/places/_design/main/_spatial/points?n=2&q=50,10&spherical=true'
-
-If the parameter `spherical=true` is set, the [Haversine formula](http://en.wikipedia.org/wiki/Haversine_formula)
-is used to calculate spherical distances for nearest-neighbour-queries. In this case the geometries are
-expected to use the coordinate system [WGS 84](http://en.wikipedia.org/wiki/WGS_84).
-
-## The Design Document Function
+The Design Document Function
+----------------------------
 
 function(doc) {
     if (doc.loc) {
@@ -62,7 +54,8 @@ of calculating it from the geometry (even if it's wrong, i.e. is not
 the actual bounding box).
 
 
-## Bounding box search and the date line
+Bounding box search and the date line
+-------------------------------------
 
 A common problem when performing bounding box searches is the date
 line/poles. As the bounding box follows the GeoJSON specification,
@@ -104,18 +97,8 @@ The bounding with the same numbers, but different order
     {"id":"namibia","bbox":[17.15,-22.566667,17.15,-22.566667],"geometry":{"type":"Point","coordinates":[17.15,-22.566667]},"value":["namibia",[17.15,-22.566667]]}
     ]}
 
-The `plane_bounds` parameter is also supported for k-nearest-neighbour-queries. Note that you don't have
-to set the `plane_bounds` parameter when `spherical=true` is enabled.
-
-    curl -X GET 'http://localhost:5984/places/_design/main/_spatial/points?n=3&q=175,-25&plane_bounds=-180,-90,180,90'
-
-    {"update_seq":6,"rows":[
-    {"id":"australia","bbox":[135,-25,135,-25],"geometry":{"type":"Point","coordinates":[135,-25]},"value":"australia"},
-    {"id":"oakland","bbox":[-122.270833,37.804444,-122.270833,37.804444],"geometry":{"type":"Point","coordinates":[-122.270833,37.804444]},"value":"oakland"},
-    {"id":"brasilia","bbox":[-52.95,-10.65,-52.95,-10.65],"geometry":{"type":"Point","coordinates":[-52.95,-10.65]},"value":"brasilia"}
-    ]}
-
-## List function support
+List function support
+---------------------
 
 GeoCouch supports List functions just as CouchDB does for Views. This way
 you can output any arbitrary format, e.g. GeoRSS.
@@ -149,7 +132,8 @@ ID in parenthesis:
     curl -X GET 'http://localhost:5984/places/_design/listfunonly/_spatial/_list/wkt/main/points?bbox=-180,-90,180,90'
 
 
-## Other supported query arguments
+Other supported query arguments
+-------------------------------
 
 ### stale ###
 `stale=ok` is supported. The spatial index won't be rebuilt even if
@@ -165,15 +149,28 @@ the query will return, not the geometry themselves.
     {"count":1}
 
 ### limit ###
+With `limit` you can limit the number of rows that should be returned.
 
-`limit` limts the number of results returned
+    curl -X GET 'http://localhost:5984/places/_design/main/_spatial/points?bbox=-180,-90,180,90&limit=2'
+
+    {"update_seq":8,"rows":[
+    {"id":"augsburg","bbox":[10.898333,48.371667,10.898333,48.371667],"geometry":{"type":"Point","coordinates":[10.898333,48.371667]},"value":["augsburg",[10.898333,48.371667]]},
+    {"id":"oakland","bbox":[-122.270833,37.804444,-122.270833,37.804444],"geometry":{"type":"Point","coordinates":[-122.270833,37.804444]},"value":["oakland",[-122.270833,37.804444]]}
+    ]}
 
 ### skip ###
+With `skip` you start to return the results at a certain offset.
 
-`skip` allows you to start to return the results at a certain offset.
+    curl -X GET 'http://localhost:5984/places/_design/main/_spatial/points?bbox=-180,-90,180,90&skip=3'
+
+    {"update_seq":8,"rows":[
+    {"id":"australia","bbox":[135,-25,135,-25],"geometry":{"type":"Point","coordinates":[135,-25]},"value":["australia",[135,-25]]},
+    {"id":"brasilia","bbox":[-52.95,-10.65,-52.95,-10.65],"geometry":{"type":"Point","coordinates":[-52.95,-10.65]},"value":["brasilia",[-52.95,-10.65]]}
+    ]}
 
 
-## Compaction, cleanup and info
+Compaction, cleanup and info
+----------------------------
 
 The API of GeoCouch's spatial indexes is similar to the one for the
 Views. Compaction of spatial indexes is per Design Document, thus:

@@ -3,13 +3,30 @@
 %%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
 
-
 -module(refuge_spatial_compactor).
 
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
 -export([compact/3, swap_compacted/2]).
+
+-record(acc, {
+    btree = nil,
+    kvs = [],
+    kvs_size = 0,
+    changes = 0,
+    total_changes
+}).
+
+-record(spatial_acc, {
+    treepos = nil,
+    treeheight = 0,
+    kvs = [],
+    kvs_size = 0,
+    changes = 0,
+    total_changes
+}).
+
 
 
 compact(_Db, State, Opts) ->
@@ -19,28 +36,43 @@ compact(_Db, State, Opts) ->
     end.
 
 compact(State) ->
-    #gcst{
-        root_dir=RootDir,
-        db_name=DbName,
-        idx_name=IdxName,
-        sig=Sig,
-        update_seq=Seq,
-        id_btree=IdBtree,
-        indexes=Idxs
+    #spatial_state{
+        db_name = DbName,
+        idx_name = IdxName,
+        sig = Sig,
+        update_seq = UpdateSeq,
+        id_btree = IdBtree,
+        views = Views
     } = State,
 
     EmptyState = couch_util:with_db(DbName, fun(Db) ->
-        CompactFName = refuge_spatial_util:compaction_file(RootDir, DbName, Sig),
-        {ok, Fd} = refuge_spatial_util:open_file(CompactFName),
-        refuge_spatial_util:reset_index(Db, Fd, State)
+        CompactFName = couch_spatial_util:compaction_file(DbName, Sig),
+        {ok, CompactFd} = couch_spatial_util:open_file(CompactFName),
+        couch_spatial_util:reset_index(Db, CompactFd, State)
     end),
 
-    #gcst{
+    #spatial_state{
         id_btree = EmptyIdBtree,
-        indexes = EmptyIdxs
+        views = EmptyViews,
+        fd = EmptyFd
     } = EmptyState,
 
-    Count = couch_btree:full_reduce(IdBtree),
+    % XXX vmx 2012-10-22: Not sure why the [] case happens
+    Count = case couch_btree:full_reduce(IdBtree) of
+        {ok, []} -> 0;
+        {ok, Count2} -> Count2
+    end,
+
+    TotalChanges = lists:foldl(
+        fun(View, Acc) ->
+            % NOTE vmx 2012-10-18: This can be slow, as it traverses the
+            %     whole tree.
+            {ok, Num} = couch_spatial_util:get_row_count(View),
+            Acc + Num
+        end,
+        Count, Views),
+    % Use "view_compaction" for now, that it shows up in Futons active tasks
+    % screen. Think about a more generic way for the future.
     couch_task_status:add_task([
         {type, view_compaction},
         {database, DbName},
@@ -48,109 +80,174 @@ compact(State) ->
         {progress, 0}
     ]),
 
-
     BufferSize0 = couch_config:get(
-        "view_compaction", "kevalue_buffer_size", "2097152"
+        "view_compaction", "keyvalue_buffer_size", "2097152"
     ),
     BufferSize = list_to_integer(BufferSize0),
 
-    FoldFun = fun({DocId, _}=KV, {Bt, Acc, AccSize, Copied, LastId}) ->
-        if DocId =:= LastId ->
-            % COUCHDB-999 regression test
-            ?LOG_ERROR("Duplicate docid `~s` detected in view group `~s`"
-                ++ ", database `~s` - This view needs to be rebuilt.",
-                [DocId, IdxName, DbName]
-            ),
-            exit({view_duplicate_id, DocId});
-        true -> ok end,
-        AccSize2 = AccSize + ?term_size(KV),
-        case AccSize2 >= BufferSize of
+    FoldFun = fun(Kv, Acc) ->
+        #acc{
+            btree = Bt,
+            kvs = Kvs,
+            kvs_size = KvsSize0
+        } = Acc,
+        KvsSize = KvsSize0 + ?term_size(Kv),
+        case KvsSize >= BufferSize of
             true ->
-                {ok, Bt2} = couch_btree:add(Bt, lists:reverse([KV|Acc])),
-                couch_task_status:update("Copied ~p of ~p Ids (~p%)",
-                    [Copied, Count, (Copied * 100) div Count]),
-                {ok, {Bt2, [], 0, Copied+1+length(Acc), DocId}};
+                {ok, Bt2} = couch_btree:add(Bt, lists:reverse([Kv | Kvs])),
+                Acc2 = update_task(Acc, 1 + length(Kvs)),
+                {ok, Acc2#acc{btree = Bt2, kvs = [], kvs_size = 0}};
             _ ->
-                {ok, {Bt, [KV | Acc], AccSize2, Copied, DocId}}
+                {ok, Acc#acc{kvs = [Kv | Kvs], kvs_size = KvsSize}}
         end
     end,
 
-
-    InitAcc = {EmptyIdBtree, [], 0, 0, nil},
+    InitAcc = #acc{
+        total_changes = TotalChanges,
+        btree = EmptyIdBtree
+    },
     {ok, _, FinalAcc} = couch_btree:foldl(IdBtree, FoldFun, InitAcc),
-    {Bt3, Uncopied, _, _, _} = FinalAcc,
+    #acc{
+        btree = Bt3,
+        kvs = Uncopied
+    } = FinalAcc,
     {ok, NewIdBtree} = couch_btree:add(Bt3, lists:reverse(Uncopied)),
+    FinalAcc2 = update_task(FinalAcc, length(Uncopied)),
+    SpatialAcc = #spatial_acc{
+        kvs = FinalAcc2#acc.kvs,
+        kvs_size = FinalAcc2#acc.kvs_size,
+        changes = FinalAcc2#acc.changes,
+        total_changes = FinalAcc2#acc.total_changes
+    },
 
-    NewIdxs = lists:map(fun({Idx, EmptyIdx}) ->
-        compact_index(Idx, EmptyIdx, BufferSize)
-    end, lists:zip(Idxs, EmptyIdxs)),
+    {NewViews, _} = lists:mapfoldl(fun({View, EmptyView}, Acc) ->
+        case View#spatial.treepos of
+            % Tree is empty, just grab the the FD
+            nil -> {EmptyView#spatial{fd = EmptyFd}, Acc};
+            _ -> compact_spatial(View, EmptyView, BufferSize, Acc)
+        end
+    end, SpatialAcc, lists:zip(Views, EmptyViews)),
 
-    unlink(EmptyState#gcst.fd),
-    {ok, EmptyState#gcst{
-        id_btree=NewIdBtree,
-        indexes=NewIdxs,
-        update_seq=Seq
+    unlink(EmptyFd),
+    {ok, EmptyState#spatial_state{
+        id_btree = NewIdBtree,
+        views = NewViews,
+        update_seq = UpdateSeq
     }}.
 
 
 recompact(State) ->
-    #gcst{
-        db_name=DbName,
-        idx_name=IdxName,
-        update_seq=UpdateSeq
+    #spatial_state{
+        fd = Fd
     } = State,
-    link(State#gcst.fd),
-    ?LOG_INFO("Recompacting index ~s ~s at ~p", [DbName, IdxName, UpdateSeq]),
-    {_Pid, Ref} = erlang:spawn_monitor(fun() ->
-        couch_index_updater:update(refuge_spatial_index, State)
+    link(Fd),
+    {Pid, Ref} = erlang:spawn_monitor(fun() ->
+        couch_index_updater:update(couch_spatial_index, State)
     end),
     receive
-        {'DOWN', Ref, _, _, {updated, State2}} ->
-            unlink(State#gcst.fd),
+        {'DOWN', Ref, _, _, {updated, Pid, State2}} ->
+            unlink(Fd),
             {ok, State2}
     end.
 
 
-compact_index(Idx, #gcidx{fd=EFd}=EmptyIdx, BufferSize) ->
-    {ok, Count} = refuge_spatial_util:get_row_count(Idx),
-    FoldFun = fun(Node, {Vt, Vh, Acc, AccSize, Copied}) ->
-        AccSize2 = AccSize + ?term_size(Node),
-        case AccSize2 >= BufferSize of
-            true ->
-                {ok, Vt2, Vh2} = vtree_bulk:bulk_load(EFd, Vt, Vh, [Node|Acc]),
-                couch_task_status:update("Spatial #~p: copied ~p of ~p (~p%)",
-                    [Idx#gcidx.id_num, Copied, Count, (Copied*100) div Count]),
-                {Vt2, Vh2, [], 0, Copied+1};
-            _ ->
-                {Vt, Vh, [Node|Acc], AccSize2, Copied}
+compact_spatial(View, EmptyView, BufferSize, Acc0) ->
+    #spatial{
+        fd = OldFd,
+        treepos = OrigTreepos
+    } = View,
+    #spatial{
+        fd = NewFd,
+        treepos = EmptyTreepos,
+        treeheight = EmptyTreeheight
+    } = EmptyView,
+
+    Fun = fun(Kv, Acc) ->
+        #spatial_acc{
+            treepos = TreePos,
+            treeheight = TreeHeight,
+            kvs = Kvs,
+            kvs_size = KvsSize0
+        } = Acc,
+        KvsSize = KvsSize0 + ?term_size(Kv),
+        case KvsSize >= BufferSize of
+        true ->
+            {ok, TreePos2, TreeHeight2} = vtree_bulk:bulk_load(
+                NewFd, TreePos, TreeHeight, [Kv|Kvs]),
+            Acc2 = update_task(Acc, 1 + length(Kvs)),
+            Acc2#spatial_acc{
+                treepos = TreePos2,
+                treeheight = TreeHeight2,
+                kvs = [],
+                kvs_size = 0
+            };
+        false ->
+            Acc#spatial_acc{
+                kvs = [Kv|Kvs],
+                kvs_size = KvsSize
+            }
         end
     end,
 
-    #gcidx{fd=Fd, vtree=Vt0} = Idx,
-    InitAcc = {EmptyIdx#gcidx.vtree, EmptyIdx#gcidx.vtree_height, [], 0, 0},
-    {Vt3, Vh3, Uncopied, _, _} = vtree:foldl(Fd, Vt0, FoldFun, InitAcc),
-    {ok, Vt4, Vh4} = vtree_bulk:bulk_load(EFd, Vt3, Vh3, Uncopied),
+    InitAcc = Acc0#spatial_acc{
+        kvs = [],
+        kvs_size = 0,
+        treepos = EmptyTreepos,
+        treeheight = EmptyTreeheight
+    },
 
-    EmptyIdx#gcidx{vtree=Vt4, vtree_height=Vh4}.
+    %{TreePos3, TreeHeight3, Uncopied, _Total} = vtree:foldl(
+    FinalAcc = vtree:foldl(OldFd, OrigTreepos, Fun, InitAcc),
+    #spatial_acc{
+        treepos = TreePos3,
+        treeheight = TreeHeight3,
+        kvs = Uncopied
+    } = FinalAcc,
+    {ok, NewTreePos, NewTreeHeight} = vtree_bulk:bulk_load(
+        NewFd, TreePos3, TreeHeight3, Uncopied),
+    FinalAcc2 = update_task(FinalAcc, length(Uncopied)),
+    NewView = EmptyView#spatial{
+        treepos = NewTreePos,
+        treeheight = NewTreeHeight,
+        fd = NewFd
+    },
+    {NewView, FinalAcc2}.
+
+
+update_task(#acc{}=Acc, ChangesInc) ->
+    #acc{
+        changes = Changes0,
+        total_changes = Total
+    } = Acc,
+    Changes = Changes0 + ChangesInc,
+    couch_task_status:update([{progress, (Changes * 100) div Total}]),
+    Acc#acc{changes = Changes};
+update_task(#spatial_acc{}=Acc, ChangesInc) ->
+    #spatial_acc{
+        changes = Changes0,
+        total_changes = Total
+    } = Acc,
+    Changes = Changes0 + ChangesInc,
+    couch_task_status:update([{progress, (Changes * 100) div Total}]),
+    Acc#spatial_acc{changes = Changes}.
+
 
 swap_compacted(OldState, NewState) ->
-    #gcst{
-        sig=Sig,
-        db_name=DbName,
-        idx_name=IdxName,
-        root_dir=RootDir
+    #spatial_state{
+        sig = Sig,
+        db_name = DbName,
+        fd = Fd,
+        fd_monitor = Monitor
     } = NewState,
-    ?LOG_INFO("Spatial index compaction complete for ~s ~s", [DbName, IdxName]),
 
-    unlink(OldState#gcst.fd),
-    link(NewState#gcst.fd),
+    link(Fd),
 
-    IndexFName = refuge_spatial_util:index_file(RootDir, DbName, Sig),
-    CompactFName = refuge_spatial_util:compaction_file(RootDir, DbName, Sig),
-
-    couch_file:close(OldState#gcst.fd),
-    erlang:demonitor(OldState#gcst.fd_monitor, [flush]),
+    RootDir = couch_index_util:root_dir(),
+    IndexFName = couch_spatial_util:index_file(DbName, Sig),
+    CompactFName = couch_spatial_util:compaction_file(DbName, Sig),
+    erlang:demonitor(Monitor, [flush]),
     ok = couch_file:delete(RootDir, IndexFName),
     ok = file:rename(CompactFName, IndexFName),
 
+    unlink(OldState#spatial_state.fd),
     {ok, NewState}.

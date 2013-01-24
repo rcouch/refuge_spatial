@@ -5,193 +5,167 @@
 
 -module(refuge_spatial).
 
--export([spatial_query/3, spatial_query/4, spatial_query/6]).
--export([count/4, get_info/2, compact/2, cleanup/1]).
+-export([query_view/6, query_view_count/4]).
+-export([get_info/2]).
+-export([compact/2, compact/3, cancel_compaction/2]).
+-export([cleanup/1]).
 
+-include_lib("couch/include/couch_db.hrl").
 -include_lib("refuge_spatial/include/refuge_spatial.hrl").
 
-
--record(gcacc, {
-        db,
-        idx,
-        limit,
-        skip,
-        meta_sent=false,
-        callback,
-        user_acc,
-        last_go=ok,
-        args}).
-
-
-spatial_query(Db, DDoc, SName) ->
-    spatial_query(Db, DDoc, SName, #gcargs{}).
+-record(acc, {
+    meta_sent = false,
+    offset,
+    limit,
+    skip,
+    callback,
+    user_acc,
+    last_go = ok,
+    update_seq = 0
+}).
 
 
-spatial_query(Db, DDoc, SName, Args) when is_list(Args) ->
-    spatial_query(Db, DDoc, SName, to_gcargs(Args), fun default_cb/2,
-                  []);
-spatial_query(Db, DDoc, SName, Args) ->
-    spatial_query(Db, DDoc, SName, Args, fun default_cb/2, []).
-
-
-spatial_query(Db, DDoc, SName, Args, Callback, Acc) when is_list(Args) ->
-    spatial_query(Db, DDoc, SName, to_gcargs(Args), Callback, Acc);
-spatial_query(Db, DDoc, SName, Args0, Callback, Acc0) ->
-    {ok, {Idx, Ref}, Sig, Args} = refuge_spatial_util:get_index(Db, DDoc,
-                                                         SName, Args0),
+query_view(Db, DDoc, ViewName, Args, Callback, Acc0) ->
+    {ok, {View, Ref}, Sig, Args2} = refuge_spatial_util:get_view(
+        Db, DDoc, ViewName, Args),
     try
-        {ok, Acc1} = case Args#gcargs.preflight_fun of
+        {ok, Acc} = case Args#spatial_args.preflight_fun of
             PFFun when is_function(PFFun, 2) -> PFFun(Sig, Acc0);
             _ -> {ok, Acc0}
         end,
-        spatial_fold(Db, Idx, Args, Callback, Acc1)
+        spatial_fold(View, Args2, Callback, Acc)
     after
         erlang:demonitor(Ref, [flush])
     end.
 
 
-default_cb(complete, Acc) ->
-    {ok, lists:reverse(Acc)};
-default_cb(Row, Acc) ->
-    {ok, [Row | Acc]}.
-
-
-count(Db, DDoc, SName, Args0) ->
-    {ok, {Idx, Ref}, _, Args} = refuge_spatial_util:get_index(Db, DDoc, SName,
-                                                       Args0),
+query_view_count(Db, DDoc, ViewName, Args) ->
+    {ok, {View, Ref}, _, _} = refuge_spatial_util:get_view(Db, DDoc, ViewName, Args),
     try
-        refuge_spatial_util:count(Idx, Args)
+        vtree:count_lookup(
+            View#spatial.fd, View#spatial.treepos, Args#spatial_args.bbox)
     after
         erlang:demonitor(Ref, [flush])
     end.
 
 
 get_info(Db, DDoc) ->
-    {ok, Pid} = refuge_spatial_util:get_indexer_pid(Db, DDoc),
+    {ok, Pid} = couch_index_server:get_index(refuge_spatial_index, Db, DDoc),
     couch_index:get_info(Pid).
 
 
 compact(Db, DDoc) ->
-    {ok, Pid} = refuge_spatial_util:get_indexer_pid(Db, DDoc),
-    couch_index:compact(Pid).
+    compact(Db, DDoc, []).
+
+
+compact(Db, DDoc, Opts) ->
+    {ok, Pid} = couch_index_server:get_index(refuge_spatial_index, Db, DDoc),
+    couch_index:compact(Pid, Opts).
+
+
+cancel_compaction(Db, DDoc) ->
+    {ok, IPid} = couch_index_server:get_index(refuge_spatial_index, Db, DDoc),
+    {ok, CPid} = couch_index:get_compactor_pid(IPid),
+    ok = couch_index_compactor:cancel(CPid),
+
+    % Cleanup the compaction file if it exists
+    {ok, State} = couch_index:get_state(IPid, 0),
+    #spatial_state{
+        sig = Sig,
+        db_name = DbName
+    } = State,
+    refuge_spatial_util:delete_compaction_file(DbName, Sig),
+    ok.
 
 
 cleanup(Db) ->
     refuge_spatial_cleanup:run(Db).
 
 
-spatial_fold(Db, Idx, Args, Callback, Acc) when
-    ((Args#gcargs.n /= nil) and
-     (Args#gcargs.q /= nil)) ->
-    #gcargs{
-        limit=Limit,
-        skip=Skip,
-        n=N,
-        q=QueryGeom,
-        spherical=Spherical,
-        bounds=Bounds
+spatial_fold(View, Args, Callback, UserAcc) ->
+    #spatial_args{
+        limit = Limit,
+        skip = Skip,
+        bbox = Bbox,
+        bounds = Bounds
     } = Args,
-
-    Acc0 = #gcacc{
-        db=Db,
-        idx=Idx,
-        callback=Callback,
-        user_acc=Acc,
-        args=Args,
-        limit=Limit,
-        skip=Skip
+    Acc = #acc{
+        limit = Limit,
+        skip = Skip,
+        callback = Callback,
+        user_acc = UserAcc,
+        update_seq = View#spatial.update_seq
     },
-    {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0,
-                                          N, QueryGeom, Bounds,
-                                          Spherical),
-    finish_fold(Acc1, Idx);
-
-spatial_fold(Db, Idx, Args, Callback, Acc) ->
-    #gcargs{
-        limit=Limit,
-        skip=Skip,
-        bbox=BBox,
-        bounds=Bounds
-    } = Args,
-
-    Acc0 = #gcacc{
-        db=Db,
-        idx=Idx,
-        callback=Callback,
-        user_acc=Acc,
-        args=Args,
-        limit=Limit,
-        skip=Skip
-    },
-
-    {ok, Acc1} = refuge_spatial_util:fold(Idx, fun spatial_fold/2, Acc0,
-                                          BBox, Bounds),
-    finish_fold(Acc1, Idx).
+    {ok, Acc2} = fold(View, fun do_fold/2, Acc, Bbox, Bounds),
+    finish_fold(Acc2, []).
 
 
-spatial_fold(Row, #gcacc{meta_sent=false}=Acc) ->
-    #gcacc{
-        idx=Idx,
-        callback=Callback,
-        user_acc=UAcc0
+fold(Index, FoldFun, InitAcc, Bbox, Bounds) ->
+    WrapperFun = fun(Node, Acc) ->
+        Expanded = refuge_spatial_util:expand_dups([Node], []),
+        lists:foldl(fun(E, {ok, Acc2}) ->
+            FoldFun(E, Acc2)
+        end, {ok, Acc}, Expanded)
+    end,
+    {_State, Acc} = vtree:lookup(
+        Index#spatial.fd, Index#spatial.treepos, Bbox,
+        {WrapperFun, InitAcc}, Bounds),
+    {ok, Acc}.
+
+
+do_fold(_Kv, #acc{skip=N}=Acc) when N > 0 ->
+    {ok, Acc#acc{skip=N-1, last_go=ok}};
+do_fold(Kv, #acc{meta_sent=false}=Acc) ->
+    #acc{
+        callback = Callback,
+        user_acc = UserAcc,
+        update_seq = UpdateSeq
     } = Acc,
-    Meta = make_meta(Idx),
-    {Go, UAcc1} = Callback(Meta, UAcc0),
-    Acc1 = Acc#gcacc{meta_sent=true, user_acc=UAcc1, last_go=Go},
+    Meta = make_meta(UpdateSeq, []),
+    {Go, UserAcc2} = Callback(Meta, UserAcc),
+    Acc2 = Acc#acc{meta_sent=true, user_acc=UserAcc2, last_go=Go},
     case Go of
-        ok -> spatial_fold(Row, Acc1);
-        stop -> {stop, Acc1}
+        ok -> do_fold(Kv, Acc2);
+        stop -> {stop, Acc2}
     end;
-spatial_fold(_KVS, #gcacc{skip=N}=Acc) when N > 0 ->
-    {ok, Acc#gcacc{skip=N-1, last_go=ok}};
-spatial_fold(_KVS, #gcacc{limit=0}=Acc) ->
+do_fold(_Kv, #acc{limit=0}=Acc) ->
     {stop, Acc};
-spatial_fold({{BBox, DocId}, {Geom, Val}}, Acc) ->
-    #gcacc{
-        callback=Callback,
-        user_acc=UAcc0,
-        limit=Limit
+do_fold({{_Bbox, _DocId}, {_Geom, _Value}}=Row, Acc) ->
+    #acc{
+        limit = Limit,
+        callback = Callback,
+        user_acc = UserAcc
     } = Acc,
-    Row = [{id, DocId}, {bbox, BBox}, {geometry, Geom}, {val, Val}],
-    {Go, UAcc1} = Callback({row, Row}, UAcc0),
-    {Go, Acc#gcacc{user_acc=UAcc1, last_go=Go, limit=Limit-1}}.
+    {Go, UserAcc2} = Callback({row, Row}, UserAcc),
+    {Go, Acc#acc{
+        limit = Limit-1,
+        user_acc = UserAcc2,
+        last_go = Go
+    }}.
 
 
-finish_fold(#gcacc{last_go=ok}=Acc, Idx) ->
-    #gcacc{callback=Callback, user_acc=UAcc}=Acc,
-    Meta = make_meta(Idx),
-    {Go, UAcc1} = case Acc#gcacc.meta_sent of
-        true -> {ok, UAcc};
-        false -> Callback(Meta, UAcc)
+finish_fold(#acc{last_go=ok}=Acc, ExtraMeta) ->
+    #acc{
+        callback = Callback,
+        user_acc = UserAcc,
+        update_seq = UpdateSeq,
+        meta_sent = MetaSent
+    }=Acc,
+    % Possible send meta info
+    Meta = make_meta(UpdateSeq, ExtraMeta),
+    {Go, UserAcc1} = case MetaSent of
+        false -> Callback(Meta, UserAcc);
+        _ -> {ok, UserAcc}
     end,
     % Notify callback that the fold is complete.
-    {_, UAcc2} = case Go of
-        ok -> Callback(complete, UAcc1);
-        _ -> {ok, UAcc1}
+    {_, UserAcc2} = case Go of
+        ok -> Callback(complete, UserAcc1);
+        _ -> {ok, UserAcc1}
     end,
-    {ok, UAcc2};
-finish_fold(#gcacc{user_acc=UAcc}, _Idx) ->
-    {ok, UAcc}.
+    {ok, UserAcc2};
+finish_fold(Acc, _ExtraMeta) ->
+    {ok, Acc#acc.user_acc}.
 
 
-make_meta(Idx) ->
-    {ok, Total} = refuge_spatial_util:get_row_count(Idx),
-    {meta, [
-        {total, Total},
-        {update_seq, Idx#gcidx.update_seq}
-    ]}.
-
-
-to_gcargs(KeyList) ->
-    lists:foldl(fun({Key, Value}, Acc) ->
-        Index = lookup_index(couch_util:to_existing_atom(Key)),
-        setelement(Index, Acc, Value)
-    end, #gcargs{}, KeyList).
-
-
-lookup_index(Key) ->
-    Index = lists:zip(
-        record_info(fields, gcargs), lists:seq(2, record_info(size,
-                                                              gcargs))
-    ),
-    couch_util:get_value(Key, Index).
+make_meta(UpdateSeq, Base) ->
+    {meta, Base ++ [{update_seq, UpdateSeq}]}.

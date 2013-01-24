@@ -1,283 +1,247 @@
 %%% -*- erlang -*-
 %%%
-%%% This file is part of refuge_spatial released under the Apache license 2. 
+%%% This file is part of refuge_spatial released under the Apache license 2.
 %%% See the NOTICE for more information.
-
 
 -module(refuge_spatial_updater).
 
--export([start_update/3, process_doc/3, finish_update/1, purge_index/4]).
+-ifdef(makecheck).
+-compile(export_all).
+-endif.
+
+-export([start_update/3, process_doc/3, finish_update/1]).
+
+% for output (couch_http_spatial, couch_http_spatial_list)
+-export([geocouch_to_geojsongeom/1]).
+
+% for polygon search
+-export([extract_bbox/2, geojsongeom_to_geocouch/1]).
 
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("refuge_spatial/include/refuge_spatial.hrl").
+
 
 start_update(Partial, State, NumChanges) ->
     QueueOpts = [{max_size, 100000}, {max_items, 500}],
     {ok, DocQueue} = couch_work_queue:new(QueueOpts),
     {ok, WriteQueue} = couch_work_queue:new(QueueOpts),
 
-    FirstState = State#gcst{
-        first_build=State#gcst.update_seq==0,
-        partial_resp_pid=Partial,
-        doc_acc=[],
-        doc_queue=DocQueue,
-        write_queue=WriteQueue
+    #spatial_state{
+        update_seq = UpdateSeq,
+        db_name = DbName,
+        idx_name = IdxName
+    } = State,
+
+    InitState = State#spatial_state{
+        first_build = UpdateSeq == 0,
+        partial_resp_pid = Partial,
+        doc_acc = [],
+        doc_queue = DocQueue,
+        write_queue = WriteQueue
     },
 
-    InitState = start_query_server(FirstState),
-
     Self = self(),
-    MapFun = fun() ->
+    SpatialFun = fun() ->
         couch_task_status:add_task([
             {type, indexer},
-            {database, State#gcst.db_name},
-            {design_document, State#gcst.idx_name},
+            {database, DbName},
+            {design_document, IdxName},
             {progress, 0},
             {changes_done, 0},
             {total_changes, NumChanges}
         ]),
         couch_task_status:set_update_frequency(500),
-        map_docs(InitState)
+        map_docs(Self, InitState)
     end,
     WriteFun = fun() -> write_results(Self, InitState) end,
 
-    spawn_link(MapFun),
+    spawn_link(SpatialFun),
     spawn_link(WriteFun),
 
     {ok, InitState}.
 
 
-process_doc(Doc, Seq, #gcst{doc_acc=Acc}=State) when length(Acc) > 100 ->
-    couch_work_queue:queue(State#gcst.doc_queue, lists:reverse(Acc)),
-    process_doc(Doc, Seq, State#gcst{doc_acc=[]});
-process_doc(nil, Seq, #gcst{doc_acc=Acc}=State) ->
-    {ok, State#gcst{doc_acc=[{nil, Seq, nil} | Acc]}};
-process_doc(#doc{id=Id, deleted=true}, Seq, #gcst{doc_acc=Acc}=State) ->
-    {ok, State#gcst{doc_acc=[{Id, Seq, deleted} | Acc]}};
-process_doc(#doc{id=Id}=Doc, Seq, #gcst{doc_acc=Acc}=State) ->
-    {ok, State#gcst{doc_acc=[{Id, Seq, Doc} | Acc]}}.
+process_doc(Doc, Seq, #spatial_state{doc_acc=Acc}=State) when
+        length(Acc) > 100 ->
+    couch_work_queue:queue(State#spatial_state.doc_queue, lists:reverse(Acc)),
+    process_doc(Doc, Seq, State#spatial_state{doc_acc=[]});
+process_doc(nil, Seq, #spatial_state{doc_acc=Acc}=State) ->
+    {ok, State#spatial_state{doc_acc=[{nil, Seq, nil} | Acc]}};
+process_doc(#doc{id=Id, deleted=true}, Seq,
+        #spatial_state{doc_acc=Acc}=State) ->
+    {ok, State#spatial_state{doc_acc=[{Id, Seq, deleted} | Acc]}};
+process_doc(#doc{id=Id}=Doc, Seq, #spatial_state{doc_acc=Acc}=State) ->
+    {ok, State#spatial_state{doc_acc=[{Id, Seq, Doc} | Acc]}}.
 
-finish_update(#gcst{doc_acc=Acc}=State) ->
+
+finish_update(State) ->
+    #spatial_state{
+        doc_acc = Acc,
+        doc_queue = DocQueue
+    } = State,
     if Acc /= [] ->
-        couch_work_queue:queue(State#gcst.doc_queue, Acc);
+        couch_work_queue:queue(DocQueue, Acc);
         true -> ok
     end,
-    couch_work_queue:close(State#gcst.doc_queue),
+    couch_work_queue:close(DocQueue),
     receive
         {new_state, NewState} ->
-            {ok, NewState#gcst{
-                first_build=undefined,
-                partial_resp_pid=undefined,
-                doc_acc=undefined,
-                doc_queue=undefined,
-                write_queue=undefined,
-                query_server=nil
+            {ok, NewState#spatial_state{
+                first_build = undefined,
+                partial_resp_pid = undefined,
+                doc_acc = undefined,
+                doc_queue = undefined,
+                write_queue = undefined,
+                query_server = nil
             }}
     end.
 
-purge_index(_Db, PurgeSeq, PurgedIdRevs, State) ->
-    #gcst{
-        id_btree=IdBtree,
-        indexes=Idxs
-    } = State,
 
-    Ids = [Id || {Id, _Revs} <- PurgedIdRevs],
-    {ok, Lookups, IdBtree2} = couch_btree:query_modify(IdBtree, Ids, [], Ids),
-
-    MakeDictFun = fun
-        ({ok, {DocId, ViewNumRowKeys}}, DictAcc) ->
-            FoldFun = fun({ViewNum, RowKey}, DictAcc2) ->
-                dict:append(ViewNum, {RowKey, DocId}, DictAcc2)
-            end,
-            lists:foldl(FoldFun, DictAcc, ViewNumRowKeys);
-        ({not_found, _}, DictAcc) ->
-            DictAcc
-    end,
-    KeysToRemove = lists:foldl(MakeDictFun, dict:new(), Lookups),
-
-    RemKeysFun = fun(Idx) ->
-        #gcidx{
-            id_num=Num,
-            fd=Fd,
-            vtree=Vt,
-            vtree_height=Vh
-        } = Idx,
-        case dict:find(Num, KeysToRemove) of
-            {ok, RemKeys} ->
-                {ok, Vt2, Vh2} = vtree:add_remove(Fd, Vt, Vh, [], RemKeys),
-                NewPurgeSeq = case Vt2 /= Vt orelse Vh2 /= Vh of
-                    true -> PurgeSeq;
-                    _ -> Idx#gcidx.purge_seq
-                end,
-                Idx#gcidx{vtree=Vt2, vtree_height=Vh2, purge_seq=NewPurgeSeq};
-            error ->
-                Idx
-        end
-    end,
-
-    {ok, State#gcst{
-        id_btree=IdBtree2,
-        indexes=lists:map(RemKeysFun, Idxs),
-        purge_seq=PurgeSeq
-    }}.
-
-% ----------------------------------------------------------------------------
-
-map_docs(State) ->
-    case couch_work_queue:dequeue(State#gcst.doc_queue) of
+map_docs(Parent, State0) ->
+    #spatial_state{
+        doc_queue = DocQueue,
+        write_queue = WriteQueue,
+        query_server = QueryServer
+    }= State0,
+    case couch_work_queue:dequeue(DocQueue) of
         closed ->
-            couch_query_servers:stop_doc_map(State#gcst.query_server),
-            couch_work_queue:close(State#gcst.write_queue);
+            couch_query_servers:stop_doc_map(QueryServer),
+            couch_work_queue:close(WriteQueue);
         {ok, Dequeued} ->
-            % Run all the non deleted docs through the view engine and
-            % then pass the results on to the writer process.
-            DocFun = fun
-                ({nil, Seq, _}, Results) ->
-                    KVs = [{I#gcidx.id_num, []} || I <- State#gcst.indexes],
-                    [{Seq, KVs, []} | Results];
-                ({Id, Seq, deleted}, Results) ->
-                    KVs = [{I#gcidx.id_num, []} || I <- State#gcst.indexes],
-                    [{Seq, KVs, [{Id, []}]} | Results];
-                ({Id, Seq, Doc}, Results) ->
-                    GeoDoc = geodoc_convert(State#gcst.query_server, Doc),
-                    {ViewKVs, DocIdKeys} = process_results(Id, State#gcst.indexes, GeoDoc),
-                    [{Seq, ViewKVs, DocIdKeys} | Results]
+            State1 = case QueryServer of
+                nil -> start_query_server(State0);
+                _ -> State0
             end,
-            FoldFun = fun(Docs, Acc) ->
-                update_task(length(Docs)),
-                lists:foldl(DocFun, Acc, Docs)
-            end,
-            Results = lists:foldl(FoldFun, [], Dequeued),
-            couch_work_queue:queue(State#gcst.write_queue, Results),
-            map_docs(State)
+            {ok, MapResults} = compute_spatial_results(State1, Dequeued),
+            couch_work_queue:queue(WriteQueue, MapResults),
+            map_docs(Parent, State1)
     end.
 
+
+compute_spatial_results(#spatial_state{query_server = Qs}, Dequeued) ->
+    % Run all the non deleted docs through the view engine and
+    % then pass the results on to the writer process.
+    DocFun = fun
+        ({nil, Seq, _}, {SeqAcc, AccDel, AccNotDel}) ->
+            {erlang:max(Seq, SeqAcc), AccDel, AccNotDel};
+        ({Id, Seq, deleted}, {SeqAcc, AccDel, AccNotDel}) ->
+            {erlang:max(Seq, SeqAcc), [{Id, []} | AccDel], AccNotDel};
+        ({_Id, Seq, Doc}, {SeqAcc, AccDel, AccNotDel}) ->
+            {erlang:max(Seq, SeqAcc), AccDel, [Doc | AccNotDel]}
+    end,
+    FoldFun = fun(Docs, Acc) ->
+        lists:foldl(DocFun, Acc, Docs)
+    end,
+    {MaxSeq, DeletedResults, Docs} =
+        lists:foldl(FoldFun, {0, [], []}, Dequeued),
+    {ok, MapResultList} = couch_query_servers:map_docs_raw(Qs, Docs),
+    NotDeletedResults = lists:zipwith(
+        fun(#doc{id = Id}, MapResults) -> {Id, MapResults} end,
+        Docs,
+        MapResultList),
+    AllMapResults = DeletedResults ++ NotDeletedResults,
+    update_task(length(AllMapResults)),
+    {ok, {MaxSeq, AllMapResults}}.
+
+
 write_results(Parent, State) ->
-    case couch_work_queue:dequeue(State#gcst.write_queue) of
+    #spatial_state{
+        write_queue = WriteQueue,
+        views = Views
+    } = State,
+    case couch_work_queue:dequeue(WriteQueue) of
         closed ->
             Parent ! {new_state, State};
         {ok, Info} ->
-            {Seq, ViewKVs, DocIdKeys} = lists:foldl(fun merge_kvs/2, nil, lists:flatten(Info)),
+            EmptyKVs = [{View#spatial.id_num, []} || View <- Views],
+            {Seq, ViewKVs, DocIdKeys} = merge_results(Info, 0, EmptyKVs, []),
             NewState = write_kvs(State, Seq, ViewKVs, DocIdKeys),
-            send_partial(NewState#gcst.partial_resp_pid, NewState),
+            send_partial(NewState#spatial_state.partial_resp_pid, NewState),
             write_results(Parent, NewState)
     end.
 
-% ----------------------------------------------------------------------------
 
 start_query_server(State) ->
-    #gcst{
-        language=Language,
-        lib=Lib,
-        indexes=Idxs
+    #spatial_state{
+        language = Language,
+        lib = Lib,
+        views = Views
     } = State,
-    Defs = [I#gcidx.def || I <- Idxs],
+    Defs = [View#spatial.def || View <- Views],
     {ok, QServer} = couch_query_servers:start_doc_map(Language, Defs, Lib),
-    State#gcst{query_server=QServer}.
-
-geodoc_convert(Proc, Doc) ->
-    Json = couch_doc:to_json_obj(Doc, []),
-    FunsResults = couch_query_servers:proc_prompt(
-        Proc, [<<"map_doc">>, Json]
-    ),
-
-    % the results are a json array of function map yields like this:
-    % [FunResults1, FunResults2 ...]
-    % where funresults is are json arrays of key value pairs:
-    % [[Geom1, Value1], [Geom2, Value2]]
-    % Convert the key, value pairs to tuples like
-    % [{Bbox1, {Geom1, Value1}}, {Bbox, {Geom2, Value2}}]
-    lists:map(fun process_js_results/1, FunsResults).
+    State#spatial_state{query_server=QServer}.
 
 
-process_js_results(Result) ->
-    JsToBBox = fun([Geo, Value]) ->
-        BBox = get_bbox(Geo, nil),
-        Geom = refuge_spatial_util:from_geojson(Geo),
-        {list_to_tuple(BBox), {Geom, Value}}
+% This is a verbatim copy from couch_mrview_updater
+merge_results([], SeqAcc, ViewKVs, DocIdKeys) ->
+    {SeqAcc, ViewKVs, DocIdKeys};
+merge_results([{Seq, Results} | Rest], SeqAcc, ViewKVs, DocIdKeys) ->
+    Fun = fun(RawResults, {VKV, DIK}) ->
+        merge_results(RawResults, VKV, DIK)
     end,
-    lists:map(JsToBBox, Result).
+    {ViewKVs1, DocIdKeys1} = lists:foldl(Fun, {ViewKVs, DocIdKeys}, Results),
+    merge_results(Rest, erlang:max(Seq, SeqAcc), ViewKVs1, DocIdKeys1).
 
 
-get_bbox({Geo}, BBox) ->
-    Type = couch_util:get_value(<<"type">>, Geo),
-    case Type of
-        <<"GeometryCollection">> ->
-            Geometries = couch_util:get_value(<<"geometries">>, Geo),
-            lists:foldl(fun get_bbox/2, BBox, Geometries);
-        _ ->
-            Coords = couch_util:get_value(<<"coordinates">>, Geo),
-            case couch_util:get_value(<<"bbox">>, Geo) of
-                undefined -> refuge_spatial_util:make_bbox(Type, Coords);
-                BBox2 -> BBox2
-            end
-    end.
+% The processing of the results is different for each indexer
+merge_results({DocId, []}, ViewKVs, DocIdKeys) ->
+    {ViewKVs, [{DocId, []} | DocIdKeys]};
+merge_results({DocId, RawResults}, ViewKVs, DocIdKeys) ->
+    JsonResults = couch_query_servers:raw_to_ejson(RawResults),
+    Results = [[process_result(Res) || Res <- FunRs] || FunRs <- JsonResults],
+    {ViewKVs1, ViewIdKeys} = insert_results(DocId, Results, ViewKVs, [], []),
+    {ViewKVs1, [ViewIdKeys | DocIdKeys]}.
 
 
-process_results(DocId, Idxs, Results) ->
-    process_results(DocId, Idxs, Results, {[], dict:new()}).
-
-process_results(_, [], [], {KVAcc, ByIdAcc}) ->
-    {lists:reverse(KVAcc), dict:to_list(ByIdAcc)};
-process_results(DocId, [I | RIdxs], [KVs | RKVs], {KVAcc, ByIdAcc}) ->
-    CombineDupsFun = fun
-        ({Key, Val}, [{Key, {dups, Vals}} | Rest]) ->
-            [{Key, {dups, [Val | Vals]}} | Rest];
-        ({Key, Val1}, [{Key, Val2} | Rest]) ->
-            [{Key, {dups, [Val1, Val2]}} | Rest];
-        (KV, Rest) ->
-            [KV | Rest]
+% This is a verbatim copy from couch_mrview_updater
+insert_results(DocId, [], [], ViewKVs, ViewIdKeys) ->
+    {lists:reverse(ViewKVs), {DocId, ViewIdKeys}};
+insert_results(DocId, [KVs | RKVs], [{Id, VKVs} | RVKVs], VKVAcc, VIdKeys) ->
+    CombineDupesFun = fun
+        ({Key, Val}, {[{Key, {dups, Vals}} | Rest], IdKeys}) ->
+            {[{Key, {dups, [Val | Vals]}} | Rest], IdKeys};
+        ({Key, Val1}, {[{Key, Val2} | Rest], IdKeys}) ->
+            {[{Key, {dups, [Val1, Val2]}} | Rest], IdKeys};
+        ({Key, _}=KV, {Rest, IdKeys}) ->
+            {[KV | Rest], [{Id, Key} | IdKeys]}
     end,
-    Duped = lists:foldl(CombineDupsFun, [], lists:sort(KVs)),
-
-    ViewKVs0 = {I#gcidx.id_num, [{{Key, DocId}, Val} || {Key, Val} <- Duped]},
-    ViewKVs = [ViewKVs0 | KVAcc],
-    AddDocIdKeys = fun({Key, _}, ByIdAcc0) ->
-        dict:append(DocId, {I#gcidx.id_num, Key}, ByIdAcc0)
-    end,
-    ByIdAcc1 = lists:foldl(AddDocIdKeys, ByIdAcc, Duped),
-    process_results(DocId, RIdxs, RKVs, {ViewKVs, ByIdAcc1}).
-
-
-merge_kvs({Seq, ViewKVs, DocIdKeys}, nil) ->
-    {Seq, ViewKVs, DocIdKeys};
-merge_kvs({Seq, ViewKVs, DocIdKeys}, {SeqAcc, ViewKVsAcc, DocIdKeysAcc}) ->
-    KVCombine = fun({ViewNum, KVs}, {ViewNum, KVsAcc}) ->
-        {ViewNum, KVs ++ KVsAcc}
-    end,
-    ViewKVs2 = lists:zipwith(KVCombine, ViewKVs, ViewKVsAcc),
-    {max(Seq, SeqAcc), ViewKVs2, DocIdKeys ++ DocIdKeysAcc}.
+    InitAcc = {[], VIdKeys},
+    {Duped, VIdKeys0} = lists:foldl(CombineDupesFun, InitAcc, lists:sort(KVs)),
+    FinalKVs = [{{Key, DocId}, Val} || {Key, Val} <- Duped] ++ VKVs,
+    insert_results(DocId, RKVs, RVKVs, [{Id, FinalKVs} | VKVAcc], VIdKeys0).
 
 
 write_kvs(State, UpdateSeq, ViewKVs, DocIdKeys) ->
-    #gcst{
+    #spatial_state{
         id_btree=IdBtree,
-        first_build=FirstBuild
+        first_build=FirstBuild,
+        fd = Fd,
+        views = Views
     } = State,
 
     {ok, ToRemove, IdBtree2} = update_id_btree(IdBtree, DocIdKeys, FirstBuild),
     ToRemByView = collapse_rem_keys(ToRemove, dict:new()),
 
-    UpdateIdx = fun(#gcidx{id_num=IdxId}=Idx, {IdxId, KVs}) ->
-        #gcidx{fd=Fd, vtree=Vt, vtree_height=Vh} = Idx,
-        ToRem = couch_util:dict_find(IdxId, ToRemByView, []),
-        Ordered = lists:reverse(KVs),
-        % io:format("Ordered: ~p~n", [Ordered]),
-        {ok, Vt2, Vh2} = vtree:add_remove(Fd, Vt, Vh, Ordered, ToRem),
-        NewUpdateSeq = case Vt2 /= Vt orelse Vh2 /= Vh of
+    UpdateView = fun(#spatial{id_num = ViewId} = View, {ViewId, KVs}) ->
+        ToRem = couch_util:dict_find(ViewId, ToRemByView, []),
+        {ok, IndexTreePos, IndexTreeHeight} = vtree:add_remove(
+            Fd, View#spatial.treepos, View#spatial.treeheight, KVs, ToRem),
+        NewUpdateSeq = case IndexTreePos =/= View#spatial.treepos of
             true -> UpdateSeq;
-            _ -> Idx#gcidx.update_seq
+            false -> View#spatial.update_seq
         end,
-        Idx#gcidx{vtree=Vt2, vtree_height=Vh2, update_seq=NewUpdateSeq}
+        View#spatial{treepos=IndexTreePos, treeheight=IndexTreeHeight,
+            update_seq=NewUpdateSeq}
     end,
 
-    State#gcst{
-        indexes=lists:zipwith(UpdateIdx, State#gcst.indexes, ViewKVs),
-        update_seq=UpdateSeq,
-        id_btree=IdBtree2
+    State#spatial_state{
+        views = lists:zipwith(UpdateView, Views, ViewKVs),
+        update_seq = UpdateSeq,
+        id_btree = IdBtree2
     }.
 
 
+% This is a verbatim copy from couch_mrview_updater
 update_id_btree(Btree, DocIdKeys, true) ->
     ToAdd = [{Id, DIKeys} || {Id, DIKeys} <- DocIdKeys, DIKeys /= []],
     couch_btree:query_modify(Btree, [], ToAdd, []);
@@ -288,6 +252,7 @@ update_id_btree(Btree, DocIdKeys, _) ->
     couch_btree:query_modify(Btree, ToFind, ToAdd, ToRem).
 
 
+% This is a verbatim copy from couch_mrview_updater
 collapse_rem_keys([], Acc) ->
     Acc;
 collapse_rem_keys([{ok, {DocId, ViewIdKeys}} | Rest], Acc) ->
@@ -299,11 +264,14 @@ collapse_rem_keys([{not_found, _} | Rest], Acc) ->
     collapse_rem_keys(Rest, Acc).
 
 
+% This is a verbatim copy from couch_mrview_updater
 send_partial(Pid, State) when is_pid(Pid) ->
     gen_server:cast(Pid, {new_state, State});
 send_partial(_, _) ->
     ok.
 
+
+% This is a verbatim copy from couch_mrview_updater
 update_task(NumChanges) ->
     [Changes, Total] = couch_task_status:get([changes_done, total_changes]),
     Changes2 = Changes + NumChanges,
@@ -315,3 +283,95 @@ update_task(NumChanges) ->
             (Changes2 * 100) div Total
     end,
     couch_task_status:update([{progress, Progress}, {changes_done, Changes2}]).
+
+
+process_result([{Geo}|[Value]]) ->
+    Type = binary_to_atom(proplists:get_value(<<"type">>, Geo), utf8),
+    Bbox = case Type of
+    'GeometryCollection' ->
+        Geometries = proplists:get_value(<<"geometries">>, Geo),
+        lists:foldl(fun({Geometry}, CurBbox) ->
+            Type2 = binary_to_atom(
+                proplists:get_value(<<"type">>, Geometry), utf8),
+            Coords = proplists:get_value(<<"coordinates">>, Geometry),
+            case proplists:get_value(<<"bbox">>, Geo) of
+            undefined ->
+                extract_bbox(Type2, Coords, CurBbox);
+            Bbox2 ->
+                Bbox2
+            end
+        end, nil, Geometries);
+    _ ->
+        Coords = proplists:get_value(<<"coordinates">>, Geo),
+        case proplists:get_value(<<"bbox">>, Geo) of
+        undefined ->
+            extract_bbox(Type, Coords);
+        Bbox2 ->
+            Bbox2
+        end
+    end,
+
+    Geom = geojsongeom_to_geocouch(Geo),
+    {erlang:list_to_tuple(Bbox), {Geom, Value}}.
+
+
+extract_bbox(Type, Coords) ->
+    extract_bbox(Type, Coords, nil).
+
+extract_bbox(Type, Coords, InitBbox) ->
+    case Type of
+    'Point' ->
+        bbox([Coords], InitBbox);
+    'LineString' ->
+        bbox(Coords, InitBbox);
+    'Polygon' ->
+        % holes don't matter for the bounding box
+        bbox(hd(Coords), InitBbox);
+    'MultiPoint' ->
+        bbox(Coords, InitBbox);
+    'MultiLineString' ->
+        lists:foldl(fun(Linestring, CurBbox) ->
+            bbox(Linestring, CurBbox)
+        end, InitBbox, Coords);
+    'MultiPolygon' ->
+        lists:foldl(fun(Polygon, CurBbox) ->
+            bbox(hd(Polygon), CurBbox)
+        end, InitBbox, Coords)
+    end.
+
+bbox([], {Min, Max}) ->
+    Min ++ Max;
+bbox([Coords|Rest], nil) ->
+    bbox(Rest, {Coords, Coords});
+bbox(Coords, Bbox) when is_list(Bbox)->
+    MinMax = lists:split(length(Bbox) div 2, Bbox),
+    bbox(Coords, MinMax);
+bbox([Coords|Rest], {Min, Max}) ->
+    Min2 = lists:zipwith(fun(X, Y) -> erlang:min(X,Y) end, Coords, Min),
+    Max2 = lists:zipwith(fun(X, Y) -> erlang:max(X,Y) end, Coords, Max),
+    bbox(Rest, {Min2, Max2}).
+
+
+% @doc Transforms a GeoJSON geometry (as Erlang terms), to an internal
+% structure
+geojsongeom_to_geocouch(Geom) ->
+    Type = proplists:get_value(<<"type">>, Geom),
+    Coords = case Type of
+    <<"GeometryCollection">> ->
+        Geometries = proplists:get_value(<<"geometries">>, Geom),
+        [geojsongeom_to_geocouch(G) || {G} <- Geometries];
+    _ ->
+        proplists:get_value(<<"coordinates">>, Geom)
+    end,
+    {binary_to_atom(Type, utf8), Coords}.
+
+% @doc Transforms internal structure to a GeoJSON geometry (as Erlang terms)
+geocouch_to_geojsongeom({Type, Coords}) ->
+    Coords2 = case Type of
+    'GeometryCollection' ->
+        Geoms = [geocouch_to_geojsongeom(C) || C <- Coords],
+        {"geometries", Geoms};
+    _ ->
+        {<<"coordinates">>, Coords}
+    end,
+    {[{<<"type">>, Type}, Coords2]}.

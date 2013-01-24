@@ -1,25 +1,40 @@
-%%% -*- erlang -*-
-%%%
-%%% This file is part of geocouch released under the Apache license 2. 
-%%% See the NOTICE for more information.
+% Licensed under the Apache License, Version 2.0 (the "License"); you may not
+% use this file except in compliance with the License. You may obtain a copy of
+% the License at
+%
+%   http://www.apache.org/licenses/LICENSE-2.0
+%
+% Unless required by applicable law or agreed to in writing, software
+% distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+% WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+% License for the specific language governing permissions and limitations under
+% the License.
 
 -module(gc_test_util).
 
 -export([init_code_path/0, random_node/0, random_node/1, build_random_tree/2,
-    lookup/3, knn/6, knnIds/6]).
+    lookup/3, root_dir/0, gc_config_file/0]).
 
 -record(node, {
     % type = inner | leaf
     type = inner
 }).
 
+% @doc The location of the GeoCouch config file relative to the root directory
+-spec gc_config_file() -> string().
+gc_config_file() ->
+    "etc/couchdb/default.d/geocouch.ini".
 
 init_code_path() ->
-    EscriptName = filename:split(escript:script_name()),
-    RootDir = lists:sublist(EscriptName, length(EscriptName)-2),
-    BuildDir = filename:join(RootDir ++ ["build"]),
+    BuildDir = filename:join(root_dir() ++ ["build"]),
     code:add_pathz(BuildDir).
 
+% @doc Returns the root directory of GeoCouch as a list. It makes the
+% assumptions that the currently running test is in <rootdir>/test/thetest.t
+-spec root_dir() -> [file:filename()].
+root_dir() ->
+    EscriptName = filename:split(filename:absname(escript:script_name())),
+    lists:sublist(EscriptName, length(EscriptName)-2).
 
 % @doc Create a random node. Return the ID of the node and the node itself.
 -spec random_node() -> {string(), tuple()}.
@@ -42,7 +57,11 @@ random_node(Seed) ->
 -spec build_random_tree(Filename::string(), Num::integer()) ->
         {ok, {file:io_device(), {integer(), integer()}}} | {error, string()}.
 build_random_tree(Filename, Num) ->
-    build_random_tree(Filename, Num, {654, 642, 698}).
+    % The random seed generator changed in R15 (erts 5.9)
+    case erlang:system_info(version) >= "5.9" of
+        true -> build_random_tree(Filename, Num, {86880, 81598, 91188});
+        false -> build_random_tree(Filename, Num, {654, 642, 698})
+    end.
 -spec build_random_tree(Filename::string(), Num::integer(),
         Seed::{integer(), integer(), integer()}) ->
         {ok, {file:io_device(), {integer(), integer()}}} | {error, string()}.
@@ -87,18 +106,3 @@ lookup(Fd, Pos, Bbox) ->
          Acc2 = [{Bbox2, DocId, Geom, Value}|Acc],
          {ok, Acc2}
     end, []}, nil).
-
-
-knn(Fd, Pos, N, QueryGeom, Bounds, Spherical) ->
-    vtree:knn(Fd, Pos, N, QueryGeom, {fun({{Bbox2, DocId}, {Geom, Value}}, Acc) ->
-         Acc2 = [{Bbox2, DocId, Geom, Value}|Acc],
-         {ok, Acc2}
-    end, []}, Bounds, Spherical).
-
-
-knnIds(Fd, Pos, N, QueryGeom, Bounds, Spherical) ->
-    vtree:knn(Fd, Pos, N, QueryGeom, {fun({{_, DocId}, {_, _}}, Acc) ->
-         Acc2 = [DocId|Acc],
-         {ok, Acc2}
-    end, []}, Bounds, Spherical).
-
